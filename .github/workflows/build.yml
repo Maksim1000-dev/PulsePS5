@@ -104,6 +104,10 @@ jobs:
       - name: Fix OpenAL MSVC build
         shell: pwsh
         run: |
+          $alc = "3rdparty/openal-soft/alc/alc.cpp"
+          if (Test-Path $alc) {
+            (Get-Content $alc).Replace('&ContextBase::EffectSlotCluster::operator*', '[](auto&& s) -> decltype(auto) { return *s; }') | Set-Content $alc
+          }
           Get-ChildItem -Path "3rdparty/openal-soft" -Include *.h,*.cpp -Recurse | ForEach-Object {
             $c = Get-Content $_.FullName -Raw
             if ($c -match 'nonblocking') {
@@ -111,6 +115,7 @@ jobs:
               Set-Content $_.FullName $c -NoNewline
             }
           }
+
 
 
 # Строка 97 (станет 105-й, оставляешь как есть):
