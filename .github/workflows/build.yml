@@ -89,6 +89,7 @@ jobs:
       - name: Setup sccache
         uses: mozilla-actions/sccache-action@v0.0.11
 
+     # Строки 87–96 (оставляешь как есть):
       - name: Verify toolchain
         shell: cmd
         run: |
@@ -99,6 +100,16 @@ jobs:
           glslangValidator --version
           echo Qt6_DIR=%Qt6_DIR%
 
+# ---> СЮДА ВСТАВЛЯЕШЬ ЭТОТ БЛОК (станут строками 97–103) <---
+      - name: Fix OpenAL MSVC build
+        shell: pwsh
+        run: |
+          $file = "3rdparty/openal-soft/alc/alc.cpp"
+          if (Test-Path $file) {
+            (Get-Content $file).Replace('&ContextBase::EffectSlotCluster::operator*', '[](auto&& s) -> decltype(auto) { return *s; }') | Set-Content $file
+          }
+
+# Строка 97 (станет 105-й, оставляешь как есть):
       - name: Configure
         shell: cmd
         run: |
