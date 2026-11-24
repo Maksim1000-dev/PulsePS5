@@ -848,9 +848,9 @@ private:
 			descriptor.dwords[3] = CanonicalizeSampleAdjustDword3(descriptor.dwords[3]);
 		}
 		const auto dword0 = descriptor.dwords[0].Resolve();
-		if (sampler && dword0.IsImmediate() && dword0.GetType() == Type::U32 &&
-		    (dword0.U32() & SamplerBorderClampMask) == 0) {
+		if (sampler && (PossibleU32Bits(dword0) & SamplerBorderClampMask) == 0u) {
 			// Border color and its table index are unused unless a clamp axis selects border mode.
+			// Prove this for runtime expressions too, not only immediate sampler words.
 			descriptor.dwords[3] = Value(0u);
 		}
 		m_resolved_handles.push_back({&handle, pc, descriptor, {}});
