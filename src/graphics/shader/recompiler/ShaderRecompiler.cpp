@@ -598,13 +598,16 @@ TranslateResult TranslateProgram(const Decoder::Program& decoded, const CompileO
 	};
 	simplify();
 	const auto read_lane_stats = IR::EliminateReadLane(ir, ir.wave_size);
-	if (read_lane_stats.rewritten_reads != 0 || read_lane_stats.rewritten_reductions != 0) {
+	const bool read_lane_changed = read_lane_stats.rewritten_reads != 0 ||
+	                               read_lane_stats.rewritten_reductions != 0;
+	if (read_lane_changed) {
 		LOGF("ShaderRecompiler %s read-lane elimination: reads=%" PRIu32
 		     " reductions=%" PRIu32 "\n",
 		     stage, read_lane_stats.rewritten_reads, read_lane_stats.rewritten_reductions);
+		// Read-lane rewrites can expose folds and dead predicate consumers; avoid
+		// rerunning the cleanup pipeline when the pass made no changes.
+		simplify();
 	}
-	// Cleanup also exposes profitable folds by removing dead predicate consumers.
-	simplify();
 	if (decoded.has_swap_pc) {
 		// Leaf returns are resolved CFG edges; native PC values must not escape into GPU data.
 		for (const auto* block: ir.blocks)
