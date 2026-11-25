@@ -239,6 +239,7 @@ ShaderModule& PipelineCache::CompileModule(Program& program, const ProgramKey& k
 	                                         Common::DebugCounters::Peak::ShaderCompileNs);
 	const auto profile = SpirvProfile(m_graphics);
 	options.profile    = &profile;
+	Log::SetShaderDiagnosticPhase("SPIR-V generation");
 	auto result = ShaderRecompiler::CompileProgram(std::move(translated), options,
 	                                               program.specialization, push_data);
 	auto info = std::move(result.program).TakeCompiledInfo();
@@ -253,7 +254,9 @@ ShaderModule& PipelineCache::CompileModule(Program& program, const ProgramKey& k
 
 	const auto* stage = ShaderRecompiler::StageName(key.stage);
 	DumpShader(result.spirv, fmt::format("{}_{:016x}_{:016x}.spv", stage, key.hash, id));
+	Log::SetShaderDiagnosticPhase("SPIR-V validation");
 	ValidateShaderSpirv(stage, key.hash, result.spirv, profile.maintenance8);
+	Log::SetShaderDiagnosticPhase("Vulkan shader module creation");
 	auto& module = program.modules.emplace_back(ShaderModule {
 	    .id             = id,
 	    .module         = CompileSPV(result.spirv, m_graphics.device),
@@ -346,6 +349,9 @@ const ShaderModule* PipelineCache::GetProgram(const ShaderParams& params, InputI
 	options.back_code       = params.back_code;
 	options.dump_ir         = Config::GetShaderLogDirection() != Config::LogDirection::Silent;
 	options.emit_debug_info = Config::GraphicsDebugDumpEnabled();
+	Log::ShaderDiagnosticScope shader_diagnostic(ShaderRecompiler::StageName(options.stage),
+	                                            params.hash);
+	shader_diagnostic.SetPhase("Shader source decoding and linkage");
 	ShaderRecompiler::ShaderSource source;
 	if (entry == m_program_cache.end()) {
 		DumpShader(params.code, fmt::format("original/{}_{:016x}.bin",
@@ -361,6 +367,7 @@ const ShaderModule* PipelineCache::GetProgram(const ShaderParams& params, InputI
 	}
 	auto* current = entry == m_program_cache.end() ? &source : entry->second.call_source.get();
 	ShaderRecompiler::TranslateResult translated;
+	shader_diagnostic.SetPhase("Shader IR translation");
 	if (current != nullptr) {
 		if (!current->calls.empty()) {
 			if (entry == m_program_cache.end()) ShaderRecompiler::RefreshShaderSource(*current, runtime);
@@ -372,6 +379,7 @@ const ShaderModule* PipelineCache::GetProgram(const ShaderParams& params, InputI
 	} else {
 		translated = ShaderRecompiler::TranslateProgram(params.code, options);
 	}
+	shader_diagnostic.SetPhase("Resource plan materialization");
 	if (entry == m_program_cache.end()) {
 		auto retained = !source.calls.empty()
 		                    ? std::make_unique<ShaderRecompiler::ShaderSource>(std::move(source))

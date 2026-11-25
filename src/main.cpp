@@ -214,6 +214,7 @@ static constexpr Flag FLAGS[] = {
     {"--vulkan-validation", &ConfigOptions::vulkan_validation_enabled},
     {"--gpu-assisted-validation", &ConfigOptions::gpu_assisted_validation_enabled},
     {"--shader-validation", &ConfigOptions::shader_validation_enabled},
+    {"--shader-failure-log", &ConfigOptions::shader_failure_log_enabled},
     {"--shader-cache", &ConfigOptions::shader_cache_enabled},
     {"--tessellation", &ConfigOptions::tessellation_enabled},
     {"--occlusion-queries", &ConfigOptions::occlusion_queries_enabled},

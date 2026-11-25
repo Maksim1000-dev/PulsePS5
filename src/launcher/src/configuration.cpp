@@ -53,6 +53,7 @@ QVariantMap Configuration::GameSettings() const {
 	KYTY_CFG_SET(console_language);
 	KYTY_CFG_SET(vulkan_validation_enabled);
 	KYTY_CFG_SET(shader_validation_enabled);
+	KYTY_CFG_SET(shader_failure_log_enabled);
 	KYTY_CFG_SET(shader_log_direction);
 	KYTY_CFG_SET(shader_log_folder);
 	KYTY_CFG_SET(command_buffer_dump_enabled);
@@ -71,6 +72,20 @@ QVariantMap Configuration::GameSettings() const {
 	KYTY_CFG_SET(red_zone_protection_enabled);
 #endif
 	KYTY_CFG_SET(elf);
+	KYTY_CFG_SET(controller_override_enabled);
+	values.insert(QStringLiteral("controller_color"), controller.color);
+	values.insert(QStringLiteral("controller_speaker_volume"),
+	              QString::number(controller.speaker_volume));
+	values.insert(QStringLiteral("controller_vibration_intensity"),
+	              QString::number(controller.vibration_intensity));
+	values.insert(QStringLiteral("controller_haptics_mode"),
+	              QString::number(static_cast<int>(controller.haptics_mode)));
+	values.insert(QStringLiteral("controller_adaptive_triggers_enabled"),
+	              QString::fromLatin1(controller.adaptive_triggers_enabled ? "true" : "false"));
+	values.insert(QStringLiteral("controller_speaker_enabled"),
+	              QString::fromLatin1(controller.speaker_enabled ? "true" : "false"));
+	values.insert(QStringLiteral("controller_keyboard_player"),
+	              QString::number(controller.keyboard_player));
 #undef KYTY_CFG_SET
 	return values;
 }
@@ -121,6 +136,7 @@ void Configuration::ReadGameSettingsValues(const Settings& s) {
 	}
 	KYTY_CFG_GET(vulkan_validation_enabled);
 	KYTY_CFG_GET(shader_validation_enabled);
+	shader_failure_log_enabled = s.value("shader_failure_log_enabled", false).toBool();
 	KYTY_CFG_GET(shader_log_direction);
 	KYTY_CFG_GET(shader_log_folder);
 	KYTY_CFG_GET(command_buffer_dump_enabled);
@@ -130,6 +146,31 @@ void Configuration::ReadGameSettingsValues(const Settings& s) {
 	KYTY_CFG_GET(profiler_enabled);
 	KYTY_CFG_GET(renderdoc_enabled);
 	KYTY_CFG_GET(guest_tsc_enabled);
+	controller_override_enabled = s.value("controller_override_enabled", false).toBool();
+	const QColor saved_controller_color(s.value("controller_color").toString());
+	controller.color = saved_controller_color.isValid()
+	                       ? saved_controller_color.name(QColor::HexRgb)
+	                       : QString {};
+	const auto read_controller_percent = [&s](const char* key, int fallback) {
+		bool      ok    = false;
+		const int value = s.value(key, fallback).toInt(&ok);
+		return ok ? qBound(0, value, 100) : fallback;
+	};
+	controller.speaker_volume =
+	    read_controller_percent("controller_speaker_volume", controller.speaker_volume);
+	controller.vibration_intensity =
+	    read_controller_percent("controller_vibration_intensity", controller.vibration_intensity);
+	const int saved_controller_haptics =
+	    s.value("controller_haptics_mode", static_cast<int>(controller.haptics_mode)).toInt();
+	controller.haptics_mode =
+	    saved_controller_haptics >= 0 && saved_controller_haptics <= 2
+	        ? static_cast<Config::ControllerHapticsMode>(saved_controller_haptics)
+	        : Config::ControllerHapticsMode::DualSense;
+	controller.adaptive_triggers_enabled =
+	    s.value("controller_adaptive_triggers_enabled", true).toBool();
+	controller.speaker_enabled = s.value("controller_speaker_enabled", true).toBool();
+	controller.keyboard_player =
+	    qBound(0, s.value("controller_keyboard_player", 0).toInt(), Config::MAX_PLAYERS);
 	KYTY_CFG_GET(pssr_upscaler);
 	KYTY_CFG_GET(dlss_folder);
 	KYTY_CFG_GET(fsr_folder);
@@ -205,6 +246,7 @@ bool Configuration::SetGameSettings(const QJsonObject& settings, QString& error)
 		return fail(tr("Trophy notification duration must be between 5 and 10 seconds."));
 	}
 	if ((shader_log_direction == LogDirection::File && shader_log_folder.isEmpty()) ||
+	    (shader_failure_log_enabled && shader_log_folder.isEmpty()) ||
 	    (printf_direction == LogDirection::File && printf_output_file.isEmpty()) ||
 	    (command_buffer_dump_enabled && command_buffer_dump_folder.isEmpty())) {
 		return fail(tr("Enabled logging and command buffer dumps require an output path."));

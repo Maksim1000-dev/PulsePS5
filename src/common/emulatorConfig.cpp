@@ -186,6 +186,10 @@ bool ShaderValidationEnabled() {
 	return g_config->shader_validation_enabled;
 }
 
+bool ShaderFailureLogEnabled() {
+	return g_config != nullptr && g_config->shader_failure_log_enabled;
+}
+
 bool ShaderCacheEnabled() {
 	return g_config->shader_cache_enabled;
 }

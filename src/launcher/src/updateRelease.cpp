@@ -39,6 +39,7 @@ Info Parse(const QByteArray& data, const QString& platform_suffix) {
 		return info;
 	}
 	info.published_at      = published_at;
+	info.notes             = root.value(QStringLiteral("body")).toString().left(32 * 1024);
 	const auto encoded_tag = QString::fromLatin1(QUrl::toPercentEncoding(info.tag));
 	info.page_url          = QUrl(PAGE_URL.arg(encoded_tag));
 

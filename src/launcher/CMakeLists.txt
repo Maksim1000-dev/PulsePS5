@@ -64,6 +64,14 @@ add_executable(launcher_update_release_tests EXCLUDE_FROM_ALL
 target_link_libraries(launcher_update_release_tests Qt6::Core)
 target_include_directories(launcher_update_release_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
 
+add_executable(launcher_configuration_tests EXCLUDE_FROM_ALL
+	"${KYTY_TESTS_DIR}/LauncherConfigurationTests.cpp"
+	src/configuration.cpp
+)
+target_link_libraries(launcher_configuration_tests Qt6::Core Qt6::Gui common)
+target_include_directories(launcher_configuration_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
+set_target_properties(launcher_configuration_tests PROPERTIES AUTOMOC ON)
+
 if(WIN32 AND NOT KYTY_CLANG_CL)
 	set_target_properties(launcher PROPERTIES LINK_FLAGS "${KYTY_LD_OPTIONS}")
 elseif(LINUX)

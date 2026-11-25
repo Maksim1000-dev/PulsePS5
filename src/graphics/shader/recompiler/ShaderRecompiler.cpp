@@ -527,6 +527,7 @@ TranslateResult TranslateProgram(const Decoder::Program& decoded, const CompileO
 		LOGF("ShaderRecompiler %s decoded RDNA2:\n%s", stage, decoded_dump.c_str());
 	}
 
+	Log::SetShaderDiagnosticPhase("CFG graph build");
 	LOGF("ShaderRecompiler %s phase begin: hash=0x%016" PRIx64 " CFG BuildGraph\n", stage,
 	     options.shader_hash);
 	auto native_cfg = CFG::BuildGraph(decoded);
@@ -541,6 +542,7 @@ TranslateResult TranslateProgram(const Decoder::Program& decoded, const CompileO
 	if (native_cfg.irreducible) {
 		LogDispatcherFallback(options, native_cfg, "build");
 	} else {
+		Log::SetShaderDiagnosticPhase("CFG structurization");
 		LOGF("ShaderRecompiler %s phase begin: hash=0x%016" PRIx64 " CFG Structurize\n", stage,
 		     options.shader_hash);
 		structured_cfg = CFG::Structurize(native_cfg);
@@ -583,6 +585,7 @@ TranslateResult TranslateProgram(const Decoder::Program& decoded, const CompileO
 	    .input_info       = options.input_info,
 	    .embedded_fetch   = embedded_fetch.loads.empty() ? nullptr : &embedded_fetch,
 	};
+	Log::SetShaderDiagnosticPhase("IR translation");
 	LOGF("ShaderRecompiler %s phase begin: hash=0x%016" PRIx64 " IR TranslateProgram\n", stage,
 	     options.shader_hash);
 	auto ir = Frontend::TranslateProgram(decoded, cfg, translate_options);
@@ -590,6 +593,7 @@ TranslateResult TranslateProgram(const Decoder::Program& decoded, const CompileO
 	     " elapsed_ms=%" PRIu64 "\n",
 	     stage, options.shader_hash,
 	     static_cast<uint64_t>(ir.blocks.size()), phase_ms());
+	Log::SetShaderDiagnosticPhase("IR optimization and lowering");
 	IR::RewriteToSsa(ir.blocks);
 	const auto simplify = [&ir] {
 		IR::ConstantPropagationPass(ir.blocks, ir.wave_size);
@@ -694,6 +698,7 @@ CompileResult CompileProgram(TranslateResult translated, const CompileOptions& o
 
 	LOGF("ShaderRecompiler %s phase begin: hash=0x%016" PRIx64 " SPIR-V EmitProgram\n", stage,
 	     ir.shader_hash);
+	Log::SetShaderDiagnosticPhase("SPIR-V emission");
 	auto spirv = Spirv::EmitProgram(ir, options.input_info, push_data, *options.profile,
 	                                options.emit_debug_info);
 	LOGF("ShaderRecompiler %s phase end: hash=0x%016" PRIx64 " SPIR-V EmitProgram words=%" PRIu64

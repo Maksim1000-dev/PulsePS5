@@ -3,8 +3,10 @@
 
 #include "common/common.h"
 
+#include <cstdint>
 #include <fmt/color.h>
 #include <fmt/printf.h>
+#include <string>
 #include <string_view>
 
 namespace Log {
@@ -27,6 +29,27 @@ bool IsSilent();
 void Write(fmt::text_style style, std::string_view text);
 // Also shown on the console when the log goes to a file or nowhere.
 void WriteToConsoleAndLog(std::string_view text);
+
+class ShaderDiagnosticScope final {
+public:
+	ShaderDiagnosticScope(std::string_view stage, uint64_t shader_hash);
+	~ShaderDiagnosticScope();
+
+	ShaderDiagnosticScope(const ShaderDiagnosticScope&)            = delete;
+	ShaderDiagnosticScope& operator=(const ShaderDiagnosticScope&) = delete;
+
+	void SetPhase(std::string_view phase);
+
+private:
+	bool        m_enabled         = false;
+	bool        m_previous_active = false;
+	uint64_t    m_previous_hash   = 0;
+	std::string m_previous_stage;
+	std::string m_previous_phase;
+};
+
+void SetShaderDiagnosticPhase(std::string_view phase);
+void WriteShaderFailureDiagnostic(const char* file, int line, std::string_view reason);
 
 namespace Color {
 

@@ -125,7 +125,7 @@ public:
 	// Activity to launch into for one run; not saved.
 	QString launch_activity;
 
-	// Controller preferences always come from the global configuration.
+	bool controller_override_enabled = false;
 	ControllerSettings controller;
 
 	QString                screen_resolution           = QStringLiteral("1280x720");
@@ -160,6 +160,7 @@ public:
 	int                    console_language            = DEFAULT_CONSOLE_LANGUAGE;
 	bool                   vulkan_validation_enabled   = false;
 	bool                   shader_validation_enabled   = false;
+	bool                   shader_failure_log_enabled  = false;
 	LogDirection           shader_log_direction        = LogDirection::Silent;
 	QString                shader_log_folder           = "_Shaders";
 	bool                   command_buffer_dump_enabled = false;
@@ -214,6 +215,7 @@ public:
 		console_language            = other.console_language;
 		vulkan_validation_enabled   = other.vulkan_validation_enabled;
 		shader_validation_enabled   = other.shader_validation_enabled;
+		shader_failure_log_enabled  = other.shader_failure_log_enabled;
 		shader_log_direction        = other.shader_log_direction;
 		shader_log_folder           = other.shader_log_folder;
 		command_buffer_dump_enabled = other.command_buffer_dump_enabled;

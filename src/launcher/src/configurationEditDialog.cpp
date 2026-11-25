@@ -129,7 +129,7 @@ ConfigurationEditDialog::ConfigurationEditDialog(Configuration& info, QWidget* p
 	m_ui->setupUi(this);
 	MakeTabsScrollable();
 	InitGameDirectories();
-	m_ui->controller_group->setVisible(false);
+	m_ui->controller_group->setVisible(true);
 	m_ui->settings_button->setVisible(false);
 
 	connect(m_ui->ok_button, &QPushButton::clicked, this, &ConfigurationEditDialog::save);
@@ -166,8 +166,15 @@ ConfigurationEditDialog::ConfigurationEditDialog(Configuration& info, QWidget* p
 	        [this](const QString& text) {
 		        auto log = TextToEnum<Configuration::LogDirection>(text);
 		        m_ui->lineEdit_shader_log_folder->setEnabled(
-		            log == Configuration::LogDirection::File);
+		            log == Configuration::LogDirection::File ||
+		            m_ui->checkBox_shader_failure_log->isChecked());
 	        });
+	connect(m_ui->checkBox_shader_failure_log, &QCheckBox::toggled, this, [this](bool enabled) {
+		m_ui->lineEdit_shader_log_folder->setEnabled(
+		    enabled || TextToEnum<Configuration::LogDirection>(
+		                   m_ui->comboBox_shader_log_direction->currentText()) ==
+		                   Configuration::LogDirection::File);
+	});
 	// Pro mode shows the upscaler and its folder.
 	const auto show_pssr = [this] {
 		const bool pro = m_ui->checkBox_pro->isChecked();
@@ -228,6 +235,10 @@ static void ListInit(QComboBox* combo, T value) {
 }
 
 void ConfigurationEditDialog::Init(const Configuration& info) {
+	m_ui->controller_group->setCheckable(!m_global_settings);
+	m_ui->controller_group->setTitle(m_global_settings ? tr("Controller")
+	                                                   : tr("Use game-specific controller profile"));
+	m_ui->controller_group->setChecked(m_global_settings || info.controller_override_enabled);
 	m_ui->lineEdit_user_name->setMaxLength(static_cast<int>(Config::MAX_USER_NAME_LENGTH));
 	m_ui->lineEdit_user_name->setText(info.user_name);
 	m_ui->spinBox_user_id->setMaximum(Config::MAX_USER_ID);
@@ -351,6 +362,7 @@ void ConfigurationEditDialog::Init(const Configuration& info) {
 	        ? info.console_language
 	        : Configuration::DEFAULT_CONSOLE_LANGUAGE);
 	m_ui->checkBox_shader_validation->setChecked(info.shader_validation_enabled);
+	m_ui->checkBox_shader_failure_log->setChecked(info.shader_failure_log_enabled);
 	m_ui->checkBox_vulkan_validation->setChecked(info.vulkan_validation_enabled);
 	m_ui->checkBox_renderdoc_capture->setChecked(info.renderdoc_enabled);
 	m_ui->checkBox_pro->setChecked(info.pro_enabled);
@@ -378,8 +390,9 @@ void ConfigurationEditDialog::Init(const Configuration& info) {
 #endif
 	ListInit(m_ui->comboBox_shader_log_direction, info.shader_log_direction);
 	m_ui->lineEdit_shader_log_folder->setText(info.shader_log_folder);
-	m_ui->lineEdit_shader_log_folder->setEnabled(info.shader_log_direction ==
-	                                             Configuration::LogDirection::File);
+	m_ui->lineEdit_shader_log_folder->setEnabled(
+	    info.shader_log_direction == Configuration::LogDirection::File ||
+	    info.shader_failure_log_enabled);
 	m_ui->checkBox_cmd_dump->setChecked(info.command_buffer_dump_enabled);
 	m_ui->lineEdit_cmd_dump_folder->setText(info.command_buffer_dump_folder);
 	m_ui->lineEdit_cmd_dump_folder->setEnabled(info.command_buffer_dump_enabled);
@@ -472,6 +485,9 @@ void ConfigurationEditDialog::SetGlobalSettings(const QStringList& dirs, const Q
 
 	m_game_dirs_group->setVisible(true);
 	m_ui->controller_group->setVisible(true);
+	m_ui->controller_group->setCheckable(false);
+	m_ui->controller_group->setChecked(true);
+	m_ui->controller_group->setTitle(tr("Controller"));
 	update_game_directory_buttons();
 	if (!m_geometry_restored) {
 		GrowToFitContents();
@@ -568,7 +584,8 @@ static void UpdateInfo(Configuration& info, Ui::ConfigurationEditDialog& ui, boo
 	info.audio_3d_enabled = ui.checkBox_audio_3d->isChecked();
 	info.audio_output =
 	    static_cast<Configuration::AudioOutput>(ui.comboBox_audio_output->currentIndex());
-	if (global_settings) {
+	info.controller_override_enabled = !global_settings && ui.controller_group->isChecked();
+	if (global_settings || info.controller_override_enabled) {
 		info.controller.color = ui.button_controller_color->property("controllerColor").toString();
 		info.controller.vibration_intensity = ui.slider_controller_vibration->value();
 		info.controller.speaker_volume      = ui.slider_controller_volume->value();
@@ -610,6 +627,7 @@ static void UpdateInfo(Configuration& info, Ui::ConfigurationEditDialog& ui, boo
 	info.console_language          = ui.comboBox_console_language->currentIndex();
 	info.vulkan_validation_enabled = ui.checkBox_vulkan_validation->isChecked();
 	info.shader_validation_enabled = ui.checkBox_shader_validation->isChecked();
+	info.shader_failure_log_enabled = ui.checkBox_shader_failure_log->isChecked();
 	info.renderdoc_enabled         = ui.checkBox_renderdoc_capture->isChecked();
 	info.pro_enabled               = ui.checkBox_pro->isChecked();
 	info.pssr_upscaler =

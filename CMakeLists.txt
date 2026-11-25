@@ -1044,6 +1044,7 @@ endif()
 
 if(BUILD_TESTING AND KYTY_BUILD_LAUNCHER)
 	add_test(NAME launcher_update_release COMMAND launcher_update_release_tests)
+	add_test(NAME launcher_configuration COMMAND launcher_configuration_tests)
 	add_test(NAME launcher_game_views COMMAND launcher_game_views_tests)
 
 	if(LINUX)

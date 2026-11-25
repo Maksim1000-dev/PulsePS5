@@ -472,7 +472,9 @@ ConfigurationListWidget::CreateConfiguration(const ConfigurationItem& item) cons
 	const auto* custom = m_custom_infos.value(item.GetInfo().game_path);
 	info->CopyGameInfoFrom(item.GetInfo());
 	info->CopyEmulatorSettingsFrom(custom != nullptr ? *custom : m_global_info);
-	info->controller = m_global_info.controller;
+	info->controller_override_enabled = custom != nullptr && custom->controller_override_enabled;
+	info->controller =
+	    info->controller_override_enabled ? custom->controller : m_global_info.controller;
 	if (custom != nullptr && !custom->elf.isEmpty()) {
 		info->elf = custom->elf;
 	}

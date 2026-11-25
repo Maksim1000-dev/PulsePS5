@@ -23,6 +23,7 @@ QByteArray ReleaseResponse(const QString& tag, const QString& asset_name) {
 	                         {QStringLiteral("published_at"), QStringLiteral("2026-11-25T13:06:41Z")},
 	                         {QStringLiteral("draft"), false},
 	                         {QStringLiteral("prerelease"), false},
+	                         {QStringLiteral("body"), QStringLiteral("Bug fixes and improvements.")},
 	                         {QStringLiteral("assets"),
 	                          QJsonArray {QJsonObject {
 	                              {QStringLiteral("name"), asset_name},
@@ -49,6 +50,8 @@ int main(int argc, char** argv) {
 
 	const auto release = UpdateRelease::Parse(ReleaseResponse(tag, asset), suffix);
 	Check(release.error.isEmpty() && release.tag == tag, "valid release metadata was rejected");
+	Check(release.notes == QStringLiteral("Bug fixes and improvements."),
+	      "release notes were not parsed");
 	Check(release.page_url ==
 	          QUrl(QStringLiteral("https://github.com/Maksim1000-dev/PulsePS5/releases/tag/%1")
 	                   .arg(tag)),

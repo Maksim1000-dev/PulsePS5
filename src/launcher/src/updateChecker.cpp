@@ -223,8 +223,11 @@ void UpdateChecker::OfferUpdate() {
 	                        "and games are kept.")
 	                         .arg(m_release.tag, QString::fromLatin1(KYTY_RELEASE_TAG)),
 	                     QMessageBox::Yes | QMessageBox::Open | QMessageBox::Cancel, m_parent);
+	question.setTextFormat(Qt::PlainText);
+	question.setDetailedText(m_release.notes.isEmpty() ? tr("No release notes are available.")
+	                                                   : m_release.notes);
 	question.button(QMessageBox::Yes)->setText(tr("Install Update"));
-	question.button(QMessageBox::Open)->setText(tr("Release Notes"));
+	question.button(QMessageBox::Open)->setText(tr("Open Release Page"));
 	question.setDefaultButton(QMessageBox::Yes);
 	const auto answer = question.exec();
 	if (answer == QMessageBox::Yes) {

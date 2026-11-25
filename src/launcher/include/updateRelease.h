@@ -19,6 +19,7 @@ inline const QString DOWNLOAD_URL =
 
 struct Info {
 	QString    tag;
+	QString    notes;
 	QUrl       page_url;
 	QUrl       download_url;
 	QByteArray sha256;

@@ -90,6 +90,7 @@ struct ConfigOptions {
 	uint32_t               console_language            = DEFAULT_CONSOLE_LANGUAGE;
 	bool                   vulkan_validation_enabled   = false;
 	bool                   shader_validation_enabled   = false;
+	bool                   shader_failure_log_enabled  = false;
 	bool                   shader_cache_enabled        = false;
 	LogDirection           shader_log_direction        = LogDirection::Silent;
 	std::filesystem::path  shader_log_folder           = "_Shaders";
@@ -169,6 +170,7 @@ uint32_t GetConsoleLanguage();
 bool     VulkanValidationEnabled();
 
 bool                   ShaderValidationEnabled();
+bool                   ShaderFailureLogEnabled();
 bool                   ShaderCacheEnabled();
 LogDirection           GetShaderLogDirection();
 std::filesystem::path  GetShaderLogFolder();

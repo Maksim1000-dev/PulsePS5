@@ -11,6 +11,7 @@ namespace Common {
 
 [[noreturn]] static void DbgReport(const char* title, std::string_view text, const char* file,
                                    int line) {
+	Log::WriteShaderFailureDiagnostic(file, line, text);
 	Log::WriteToConsoleAndLog(fmt::format("--- Build ---\n{}\n{}\n{} in {}:{}\n", KYTY_BUILD_LABEL,
 	                                      title, text, file, line));
 	Subsystems::EmergencyShutdownActive();

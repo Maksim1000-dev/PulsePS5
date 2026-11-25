@@ -5,8 +5,11 @@
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <iterator>
 #include <memory>
+#include <mutex>
+#include <utility>
 #include <spdlog/logger.h>
 #include <spdlog/pattern_formatter.h>
 #include <spdlog/sinks/basic_file_sink.h>
@@ -19,6 +22,16 @@ static bool g_console     = false;
 // Null when silent. Only Initialize sets it, before other threads start. Never destroyed, since
 // threads keep logging while exit runs static destructors.
 static spdlog::logger* g_logger = nullptr;
+
+struct ShaderDiagnosticContext {
+	bool        active = false;
+	uint64_t    hash   = 0;
+	std::string stage;
+	std::string phase;
+};
+
+static thread_local ShaderDiagnosticContext g_shader_diagnostic_context;
+static std::mutex                            g_shader_diagnostic_mutex;
 
 static void WriteStdout(std::string_view text, fmt::text_style style) {
 	if (style == fmt::text_style {}) {
@@ -51,6 +64,14 @@ void Initialize() {
 		sink->set_formatter(std::make_unique<spdlog::pattern_formatter>(
 		    "%v", spdlog::pattern_time_type::local, ""));
 		g_logger = new spdlog::logger("kyty", std::move(sink));
+	}
+	if (Config::ShaderFailureLogEnabled()) {
+		std::error_code error;
+		std::filesystem::remove(Config::GetShaderLogFolder() / "shader-failure.log", error);
+		if (error) {
+			WriteToConsoleAndLog(fmt::format("Could not remove previous shader failure report: {}\n",
+			                                  error.message()));
+		}
 	}
 }
 
@@ -88,6 +109,80 @@ void WriteToConsoleAndLog(std::string_view text) {
 	}
 	Write({}, text);
 	Flush();
+}
+
+ShaderDiagnosticScope::ShaderDiagnosticScope(std::string_view stage, uint64_t shader_hash) {
+	if (!Config::ShaderFailureLogEnabled()) {
+		return;
+	}
+	m_enabled         = true;
+	m_previous_active = g_shader_diagnostic_context.active;
+	m_previous_hash   = g_shader_diagnostic_context.hash;
+	m_previous_stage  = std::move(g_shader_diagnostic_context.stage);
+	m_previous_phase  = std::move(g_shader_diagnostic_context.phase);
+	g_shader_diagnostic_context.active = true;
+	g_shader_diagnostic_context.hash   = shader_hash;
+	g_shader_diagnostic_context.stage  = std::string(stage);
+	g_shader_diagnostic_context.phase.clear();
+}
+
+ShaderDiagnosticScope::~ShaderDiagnosticScope() {
+	if (!m_enabled) {
+		return;
+	}
+	g_shader_diagnostic_context.active = m_previous_active;
+	g_shader_diagnostic_context.hash   = m_previous_hash;
+	g_shader_diagnostic_context.stage  = std::move(m_previous_stage);
+	g_shader_diagnostic_context.phase  = std::move(m_previous_phase);
+}
+
+void ShaderDiagnosticScope::SetPhase(std::string_view phase) {
+	if (m_enabled) {
+		g_shader_diagnostic_context.phase = std::string(phase);
+	}
+}
+
+void SetShaderDiagnosticPhase(std::string_view phase) {
+	if (g_shader_diagnostic_context.active) {
+		g_shader_diagnostic_context.phase = std::string(phase);
+	}
+}
+
+void WriteShaderFailureDiagnostic(const char* file, int line, std::string_view reason) {
+	if (!Config::ShaderFailureLogEnabled() || !g_shader_diagnostic_context.active) {
+		return;
+	}
+
+	const auto folder = Config::GetShaderLogFolder();
+	if (folder.empty()) {
+		WriteToConsoleAndLog("Could not write shader failure report: shader log folder is empty.\n");
+		return;
+	}
+	const auto path = folder / "shader-failure.log";
+	std::lock_guard lock(g_shader_diagnostic_mutex);
+	std::error_code error;
+	std::filesystem::create_directories(folder, error);
+	if (error) {
+		WriteToConsoleAndLog(fmt::format("Could not create shader failure report folder: {}\n",
+		                                  error.message()));
+		return;
+	}
+
+	std::ofstream report(path, std::ios::out | std::ios::trunc);
+	if (!report) {
+		WriteToConsoleAndLog("Could not open shader failure report for writing.\n");
+		return;
+	}
+	report << "PulsePS5 shader failure\n"
+	       << "Stage: " << g_shader_diagnostic_context.stage << '\n'
+	       << fmt::format("Shader hash: 0x{:016x}\n", g_shader_diagnostic_context.hash)
+	       << "Last step: " << g_shader_diagnostic_context.phase << '\n'
+	       << "Location: " << file << ':' << line << "\n\n"
+	       << reason << '\n';
+	report.flush();
+	if (!report) {
+		WriteToConsoleAndLog("Writing the shader failure report failed.\n");
+	}
 }
 
 } // namespace Log
