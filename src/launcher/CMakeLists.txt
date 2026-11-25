@@ -66,6 +66,7 @@ target_include_directories(launcher_update_release_tests PRIVATE "${CMAKE_CURREN
 
 add_executable(launcher_configuration_tests EXCLUDE_FROM_ALL
 	"${KYTY_TESTS_DIR}/LauncherConfigurationTests.cpp"
+	include/configuration.h
 	src/configuration.cpp
 )
 target_link_libraries(launcher_configuration_tests Qt6::Core Qt6::Gui common)
