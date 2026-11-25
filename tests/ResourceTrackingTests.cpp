@@ -5725,9 +5725,10 @@ void TestSampleAdjustSamplerScratch() {
                                std::array{0x36u, 0xfff000u, 0x02500000u, 0u}),
         "SampleAdjust shift-only scratch was not reduced to its zero border payload");
 
-  const auto CheckRejected = [](uint32_t flags, uint32_t shift,
-                                const char *message) {
+  const auto CheckRejected = [](uint32_t flags, uint32_t shift, uint64_t hash,
+                                uint32_t pc, const char *message) {
     Fixture rejected(ShaderType::Pixel);
+    rejected.program.shader_hash = hash;
     const auto condition = rejected.Emit(
         ValueOpcode::IEqual32, {rejected.Emit(ValueOpcode::LaneId), Value(0u)});
     const auto bit = rejected.Emit(ValueOpcode::SelectU32,
@@ -5739,26 +5740,63 @@ void TestSampleAdjustSamplerScratch() {
     const auto rejected_image =
         rejected.Image({Value(0u), Value(0u), Value(0u), Value(0u), Value(0u),
                         Value(0u), Value(0u), Value(0u)},
-                       0x200);
+                       pc);
     const auto rejected_sampler =
         rejected.Sampler({rejected.UserData(0), rejected.UserData(1),
                           rejected.UserData(2), dynamic_word3},
-                         0x200);
+                         pc);
     MemoryInfo rejected_memory;
     rejected_memory.kind = ResourceKind::Image;
     rejected_memory.image_dimension = Decoder::ImageDimension::Dim2D;
     rejected_memory.image_sample_flags = flags;
     rejected.Emit(ValueOpcode::ImageSampleRaw,
                   {rejected_image, rejected_sampler, rejected.ImageAddress(), Value(true)},
-                  rejected.AddMemory(rejected_memory, 0x200));
+                  rejected.AddMemory(rejected_memory, pc));
 
     CheckFatal([&] { rejected.PlanAndTrack(); },
                "not a valid runtime value", message);
   };
-  CheckRejected(0u, 12u,
+  CheckRejected(0u, 12u, 0u, 0x200,
                 "ordinary sampling accepted SampleAdjust reserved scratch");
-  CheckRejected(Decoder::ImageSampleFlagAdjust, 30u,
+  CheckRejected(Decoder::ImageSampleFlagAdjust, 30u, 0u, 0x200,
                 "SampleAdjust canonicalization discarded border-mode bits");
+  CheckRejected(0u, 12u, 0x5298508a1c4defe7ull, 0x200,
+                "GTA5 workaround escaped its target instruction");
+}
+
+void TestGta5SamplerDword3Fallback() {
+  constexpr uint64_t shader_hash = 0x5298508a1c4defe7ull;
+  constexpr uint32_t sample_pc = 0xc8u;
+  Fixture fixture(ShaderType::Pixel);
+  fixture.program.shader_hash = shader_hash;
+  const auto active = fixture.Emit(
+      ValueOpcode::IEqual32, {fixture.Emit(ValueOpcode::LaneId), Value(0u)});
+  const auto lane =
+      fixture.Emit(ValueOpcode::SelectU32, {active, Value(1u), Value(0u)});
+  const auto scratch =
+      fixture.Emit(ValueOpcode::ShiftLeftLogical32, {lane, Value(12u)});
+  const auto word3 =
+      fixture.Emit(ValueOpcode::BitwiseOr32, {fixture.UserData(3), scratch});
+  const auto image = fixture.Image(
+      {Value(0u), Value(0u), Value(0u), Value(0u), Value(0u), Value(0u),
+       Value(0u), Value(0u)},
+      sample_pc);
+  const auto sampler = fixture.Sampler(
+      {fixture.UserData(0), fixture.UserData(1), fixture.UserData(2), word3},
+      sample_pc);
+  MemoryInfo memory;
+  memory.kind = ResourceKind::Image;
+  memory.image_dimension = Decoder::ImageDimension::Dim2D;
+  fixture.Emit(ValueOpcode::ImageSampleRaw,
+               {image, sampler, fixture.ImageAddress(), Value(true)},
+               fixture.AddMemory(memory, sample_pc));
+
+  fixture.PlanAndTrack();
+  Check(fixture.program.info.samplers.size() == 1u,
+        "GTA5 sampler fallback did not retain the sampler");
+  const auto source = fixture.program.info.samplers[0].source;
+  Check(fixture.program.descriptor_sources[source].dwords[3].Resolve() == Value(0u),
+        "GTA5 sampler fallback did not replace invalid dword 3");
 }
 
 void TestFmaskLoadSpecialization() {
@@ -9369,6 +9407,7 @@ int main() {
     Run("images and samplers", TestImagesSamplersAndAliases);
     Run("independent image/sampler pairs", TestIndependentImageSamplerPairs);
     Run("SampleAdjust sampler scratch", TestSampleAdjustSamplerScratch);
+    Run("GTA5 sampler dword 3 fallback", TestGta5SamplerDword3Fallback);
     Run("FMASK load specialization", TestFmaskLoadSpecialization);
     Run("folded image operation memory", TestFoldedImageOperationMemory);
     Run("gather LOD sampler validation", TestGatherLodSamplerValidation);

@@ -27,6 +27,8 @@ namespace {
 
 constexpr uint32_t SamplerBorderClampMask    = (1u << 2u) | (1u << 5u) | (1u << 8u);
 constexpr uint32_t SamplerDword3ReservedMask = 0x3ffff000u;
+constexpr uint64_t Gta5SamplerFallbackHash   = 0x5298508a1c4defe7ull;
+constexpr uint32_t Gta5SamplerFallbackPc     = 0xc8u;
 
 // value and every value reaching it through Phi arms, each once, in depth-first order.
 std::vector<Value> PhiWeb(Value value) {
@@ -4078,27 +4080,25 @@ private:
 		MakeSource(*handle, width, sampler, sample_adjust, base_reg, descriptor, pc);
 		uint32_t bad_dword = 0;
 		if (!ValidateSource(descriptor, bad_dword)) {
-			if (expected == ValueOpcode::GetBufferResource &&
+			if (expected == ValueOpcode::GetSamplerResource && bad_dword == 3u &&
+			    m_program.shader_hash == Gta5SamplerFallbackHash &&
+			    m_program.stage == ShaderType::Pixel && pc == Gta5SamplerFallbackPc) {
+				std::printf("Warning: applying GTA5 sampler fallback: hash=0x%016llx "
+				            "stage=pixel pc=0x%08x; replacing invalid dword 3 with 0u\n",
+				            static_cast<unsigned long long>(m_program.shader_hash), pc);
+				descriptor.dwords[3] = Value(0u);
+				if (!ValidateSource(descriptor, bad_dword)) {
+					Fail(pc, fmt::format("{} dword {} is not a valid runtime value after GTA5 fallback",
+					                     ValueOpcodeName(expected), bad_dword));
+				}
+			} else if (expected == ValueOpcode::GetBufferResource &&
 			    std::all_of(descriptor.dwords.begin(), descriptor.dwords.begin() + width,
 			                [](Value word) { return word.Resolve().GetType() == Type::U32; })) {
 				return false;
+			} else {
+				Fail(pc, fmt::format("{} dword {} is not a valid runtime value",
+				                     ValueOpcodeName(expected), bad_dword));
 			}
-			if (expected == ValueOpcode::GetSamplerResource && bad_dword == 3u) {
-				std::printf("Warning: shader resource tracking fallback: hash=0x%016llx stage=%s "
-				            "pc=0x%08x GetSamplerResource dword 3 is not a valid runtime value; "
-				            "using 0u fallback descriptor\n",
-				            static_cast<unsigned long long>(m_program.shader_hash),
-				            StageName(m_program.stage), pc);
-				descriptor.dwords[3] = Value(0u);
-				if (!ValidateSource(descriptor, bad_dword)) {
-					Fail(pc, fmt::format("{} dword {} is not a valid runtime value after fallback",
-					                     ValueOpcodeName(expected), bad_dword));
-				}
-				source = InternSource(descriptor);
-				return true;
-			}
-			Fail(pc, fmt::format("{} dword {} is not a valid runtime value",
-			                     ValueOpcodeName(expected), bad_dword));
 		}
 		source = InternSource(descriptor);
 		return true;
