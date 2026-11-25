@@ -27,10 +27,9 @@ bool ShowsBackground(const QColor &color) {
   return color.red() > color.green() + 40 && color.red() > color.blue() + 40;
 }
 
-// The card panel is the app's (white) Window color over the background.
-bool ShowsPanel(const QColor &color) {
-  return !ShowsBackground(color) &&
-         qAbs(color.lightness() - QApplication::palette().color(QPalette::Window).lightness()) < 32;
+// The translucent card panel must be visibly lighter than the game background.
+bool ShowsPanel(const QColor &color, const QColor &background) {
+  return color.lightness() > background.lightness() + 32;
 }
 
 class PaintCounter final : public QObject {
@@ -95,7 +94,7 @@ int main(int argc, char **argv) {
   Check(card.width() == 64 + 16, "the card is not the cover plus its padding wide");
   Check(image.pixelColor(card.topLeft() + QPoint(8 + 32, 8 + 32)) == QColor(Qt::blue),
         "the cover is not drawn inside the card padding");
-  Check(ShowsPanel(image.pixelColor(card.topLeft() + QPoint(4, 40))),
+  Check(ShowsPanel(image.pixelColor(card.topLeft() + QPoint(4, 40)), image.pixelColor(empty)),
         "the card panel does not back its padding");
 
   PaintCounter counter;
