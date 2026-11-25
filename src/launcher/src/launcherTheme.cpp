@@ -28,6 +28,35 @@ QDialog, QMainWindow {
     background-color: #0b1020;
 }
 
+QFrame#pulse_header {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                                stop:0 #14233b, stop:1 #0e1728);
+    border: 1px solid #2c4264;
+    border-radius: 16px;
+}
+
+QLabel#pulse_brand_label {
+    color: #f7faff;
+    font-size: 24pt;
+    font-weight: 700;
+}
+
+QLabel#pulse_tagline_label {
+    color: #85b7ff;
+    font-size: 8pt;
+    font-weight: 600;
+}
+
+QLabel#pulse_library_badge {
+    color: #d7e8ff;
+    background-color: #1b3150;
+    border: 1px solid #365783;
+    border-radius: 12px;
+    font-size: 8pt;
+    font-weight: 700;
+    padding: 8px 14px;
+}
+
 QLabel {
     background: transparent;
     color: #e8edfa;
