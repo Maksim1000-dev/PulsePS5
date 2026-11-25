@@ -12,7 +12,7 @@ concurrency:
 
 env:
   SCCACHE_GHA_ENABLED: "true"
-  KYTY_BUILD_ORIGIN: ${{ (github.repository == 'KytyPS5/KytyPS5' || github.repository == 'Maksim1000-dev/PulsePS5') && github.event_name == 'push' && 'Official' || (github.repository != 'KytyPS5/KytyPS5' && github.repository != 'Maksim1000-dev/PulsePS5') && 'Fork' || 'Source' }}
+  KYTY_BUILD_ORIGIN: ${{ (github.repository == 'KytyPS5/KytyPS5' || github.repository == 'Maksim1000-dev/PulsePS5') && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master') && 'Official' || (github.repository != 'KytyPS5/KytyPS5' && github.repository != 'Maksim1000-dev/PulsePS5') && 'Fork' || 'Source' }}
   KYTY_BUILD_REPOSITORY: ${{ github.repository }}
 
 jobs:
@@ -311,8 +311,10 @@ jobs:
   release:
     name: Release PulsePS5
     if: >-
-      github.event_name == 'push' &&
       github.repository == 'Maksim1000-dev/PulsePS5' &&
+      (github.event_name == 'push' ||
+      (github.event_name == 'workflow_dispatch' &&
+      (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'))) &&
       needs.windows.result == 'success' &&
       needs.linux.result == 'success'
     needs: [metadata, windows, linux]
