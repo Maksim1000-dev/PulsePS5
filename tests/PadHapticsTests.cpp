@@ -478,6 +478,19 @@ void TestRumbleFallbackGains() {
 	Check(streams.empty() && hid_opens == 0, "rumble fallback opened an audio device");
 }
 
+void TestDualSenseRumbleFallback() {
+	Config::ConfigOptions options;
+	options.controller_haptics_mode = Config::ControllerHapticsMode::Rumble;
+	Config::Load(options);
+	Fixture f;
+	auto    port = Open();
+	Queue(port, pcm.data());
+	Check(streams.empty() && pad_rumble[1].large == 65535 &&
+	          pad_rumble[1].small == 65535 && hid_opens == 0,
+	      "ordinary haptics mode did not convert DualSense audio to motor rumble");
+	Config::Load(Config::ConfigOptions {});
+}
+
 void TestRumbleFallbackSwitch() {
 	for (bool bluetooth: {false, true}) {
 		Fixture f;
@@ -1272,6 +1285,42 @@ void TestAudioVibrationGain() {
 	}
 }
 
+void TestAudioOutputToggles() {
+	{
+		Config::ConfigOptions options;
+		options.controller_speaker_enabled = false;
+		Config::Load(options);
+		Fixture f;
+		Libs::Audio::Audio audio;
+		const auto port =
+		    audio.AudioOutOpen(4, 1024, 48000, Libs::Audio::Audio::Format::FloatStereo);
+		std::vector<float> sound(2048, 0.5f);
+		Libs::Audio::Audio::OutputParam output {port, sound.data()};
+		audio.AudioOutOutputs(&output, 1, false);
+		Check(default_stream != nullptr && SDL_GetAudioStreamQueued(default_stream) == 0 &&
+		          hid_opens == 0,
+		      "disabling the controller speaker routed its audio elsewhere");
+		audio.AudioOutClose(port);
+	}
+	{
+		Config::ConfigOptions options;
+		options.controller_haptics_mode = Config::ControllerHapticsMode::Off;
+		Config::Load(options);
+		Fixture f;
+		Libs::Audio::Audio audio;
+		const auto port =
+		    audio.AudioOutOpen(10, 1024, 48000, Libs::Audio::Audio::Format::FloatStereo);
+		std::vector<float> sound(2048, 0.5f);
+		Libs::Audio::Audio::OutputParam output {port, sound.data()};
+		audio.AudioOutOutputs(&output, 1, false);
+		Check(streams.empty() && hid_opens == 0 && pad_rumble[1].large == 0 &&
+		          pad_rumble[1].small == 0,
+		      "disabling haptics did not mute the vibration output");
+		audio.AudioOutClose(port);
+	}
+	Config::Load(Config::ConfigOptions {});
+}
+
 void TestBluetoothAudioSpeakerRouting() {
 	Fixture f;
 	wireless = hid_available = true;
@@ -1312,10 +1361,14 @@ void TestAudioDefaultResumeFailure() {
 
 int main() {
 	SDL_SetHint(SDL_HINT_AUDIO_DRIVER, "dummy");
+	Config::Initialize();
+	Config::Load(Config::ConfigOptions {});
 	TestAudioSpeakerFallback();
 	TestAudioSpeakerRouting();
 	TestAudioFallbackGain();
 	TestAudioVibrationGain();
+	TestAudioOutputToggles();
+	TestDualSenseRumbleFallback();
 	TestBluetoothAudioSpeakerRouting();
 	TestAudioDefaultResumeFailure();
 	TestFormatsAndVolume();
@@ -1350,5 +1403,6 @@ int main() {
 	TestScaledRumbleDuration();
 	TestSwitchStopsOldRumble();
 	TestCloseRestoresRumble();
+	Config::Shutdown();
 	std::printf("PadHapticsTests: all cases passed\n");
 }

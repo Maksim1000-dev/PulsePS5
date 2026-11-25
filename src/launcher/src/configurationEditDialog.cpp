@@ -156,6 +156,12 @@ ConfigurationEditDialog::ConfigurationEditDialog(Configuration& info, QWidget* p
 	connect(m_ui->slider_controller_volume, &QSlider::valueChanged, this, [this](int value) {
 		m_ui->label_controller_volume_value->setText(tr("%1%").arg(value));
 	});
+	connect(m_ui->checkBox_haptics_enabled, &QCheckBox::toggled,
+	        m_ui->comboBox_haptics_fallback, &QComboBox::setDisabled);
+	connect(m_ui->checkBox_controller_speaker, &QCheckBox::toggled, this, [this](bool enabled) {
+		m_ui->slider_controller_volume->setEnabled(enabled);
+		m_ui->label_controller_volume_value->setEnabled(enabled);
+	});
 	connect(m_ui->comboBox_shader_log_direction, &QComboBox::currentTextChanged, this,
 	        [this](const QString& text) {
 		        auto log = TextToEnum<Configuration::LogDirection>(text);
@@ -229,6 +235,24 @@ void ConfigurationEditDialog::Init(const Configuration& info) {
 	UpdateControllerColorButton(m_ui->button_controller_color, info.controller.color);
 	m_ui->slider_controller_vibration->setValue(info.controller.vibration_intensity);
 	m_ui->slider_controller_volume->setValue(info.controller.speaker_volume);
+	auto* haptics_fallback = m_ui->comboBox_haptics_fallback;
+	haptics_fallback->clear();
+	haptics_fallback->addItem(tr("Ordinary vibration"),
+	                          static_cast<int>(Config::ControllerHapticsMode::Rumble));
+	haptics_fallback->addItem(tr("None"),
+	                          static_cast<int>(Config::ControllerHapticsMode::Off));
+	m_ui->checkBox_haptics_enabled->setChecked(
+	    info.controller.haptics_mode == Config::ControllerHapticsMode::DualSense);
+	const auto fallback = info.controller.haptics_mode == Config::ControllerHapticsMode::Off
+	                          ? Config::ControllerHapticsMode::Off
+	                          : Config::ControllerHapticsMode::Rumble;
+	haptics_fallback->setCurrentIndex(haptics_fallback->findData(static_cast<int>(fallback)));
+	haptics_fallback->setEnabled(
+	    info.controller.haptics_mode != Config::ControllerHapticsMode::DualSense);
+	m_ui->checkBox_adaptive_triggers->setChecked(info.controller.adaptive_triggers_enabled);
+	m_ui->checkBox_controller_speaker->setChecked(info.controller.speaker_enabled);
+	m_ui->slider_controller_volume->setEnabled(info.controller.speaker_enabled);
+	m_ui->label_controller_volume_value->setEnabled(info.controller.speaker_enabled);
 	auto* keyboard_player = m_ui->comboBox_keyboard_player;
 	keyboard_player->clear();
 	keyboard_player->addItem(tr("Shared with player 1 (default)"), 0);
@@ -548,6 +572,13 @@ static void UpdateInfo(Configuration& info, Ui::ConfigurationEditDialog& ui, boo
 		info.controller.color = ui.button_controller_color->property("controllerColor").toString();
 		info.controller.vibration_intensity = ui.slider_controller_vibration->value();
 		info.controller.speaker_volume      = ui.slider_controller_volume->value();
+		info.controller.haptics_mode = ui.checkBox_haptics_enabled->isChecked()
+		                                   ? Config::ControllerHapticsMode::DualSense
+		                                   : static_cast<Config::ControllerHapticsMode>(
+		                                         ui.comboBox_haptics_fallback->currentData().toInt());
+		info.controller.adaptive_triggers_enabled =
+		    ui.checkBox_adaptive_triggers->isChecked();
+		info.controller.speaker_enabled = ui.checkBox_controller_speaker->isChecked();
 		info.controller.keyboard_player     = ui.comboBox_keyboard_player->currentData().toInt();
 	}
 	info.screen_resolution =

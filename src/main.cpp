@@ -42,6 +42,9 @@ static void PrintUsage() {
 	::printf("  --controller-color <#RRGGBB>        Override the controller lightbar color.\n");
 	::printf("  --controller-volume <0-100>         DualSense speaker volume. Default: 50.\n");
 	::printf("  --controller-vibration <0-100>      DualSense vibration intensity. Default: 100.\n");
+	::printf("  --controller-haptics <mode>          DualSense, Rumble, or Off. Default: DualSense.\n");
+	::printf("  --disable-adaptive-triggers           Disable resistance; analog input remains active.\n");
+	::printf("  --disable-controller-speaker          Mute game audio routed to the controller speaker.\n");
 	::printf("  --keyboard-player <0-4>             Keyboard player; 0 shares player 1 with the gamepad. Default: 0.\n");
 	::printf(
 	    "  --present-mode <value>               Fifo, Mailbox, or Immediate. Default: Mailbox.\n");
@@ -196,6 +199,8 @@ static constexpr Flag FLAGS[] = {
     {"--rd", &ConfigOptions::renderdoc_enabled},
     {"--fullscreen", &ConfigOptions::fullscreen_enabled},
     {"--audio-3d", &ConfigOptions::audio_3d_enabled},
+    {"--disable-adaptive-triggers", &ConfigOptions::controller_adaptive_triggers_enabled, false},
+    {"--disable-controller-speaker", &ConfigOptions::controller_speaker_enabled, false},
     {"--hdr", &ConfigOptions::hdr_enabled},
     {"--hide-cursor", &ConfigOptions::hide_cursor_enabled},
     {"--stretch", &ConfigOptions::stretch_enabled},
@@ -378,6 +383,12 @@ static bool ParseArgs(int argc, char* argv[], RunOptions& options, bool& show_he
 			if (!ParseUint32(value, options.config.controller_vibration_intensity) ||
 			    options.config.controller_vibration_intensity > 100) {
 				::printf("invalid controller vibration intensity: %s\n", value.c_str());
+				return false;
+			}
+		} else if (arg == "--controller-haptics") {
+			if (!ParseEnum(value, options.config.controller_haptics_mode)) {
+				::printf("invalid controller haptics mode (expected DualSense, Rumble, or Off): %s\n",
+				         value.c_str());
 				return false;
 			}
 		} else if (arg == "--keyboard-player") {

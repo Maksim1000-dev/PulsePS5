@@ -45,6 +45,11 @@ public:
 	void ScanGameDirectory();
 	void ViewTrophies();
 	void ViewTrophyOverview();
+	void RunSelectedGame() {
+		if (m_run_enabled) {
+			emit Run();
+		}
+	}
 
 signals:
 

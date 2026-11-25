@@ -6,6 +6,7 @@
 #include "gameContent.h"
 
 #include <QAbstractItemView>
+#include <QButtonGroup>
 #include <QDateTime>
 #include <QDialogButtonBox>
 #include <QFileInfo>
@@ -25,6 +26,7 @@
 #include <QStringList>
 #include <QTabBar>
 #include <QTabWidget>
+#include <QToolButton>
 #include <QVBoxLayout>
 
 #include <utility>
@@ -493,6 +495,27 @@ bool TrophyViewerDialog::LoadGame(const Configuration& info, const QString& runt
 		auto* count_label = new QLabel(tr("All trophies: %1").arg(counts.total), page);
 		page_layout->addWidget(count_label);
 
+		auto* filter_row = new QHBoxLayout;
+		auto* filter_title = new QLabel(tr("SHOW"), page);
+		filter_title->setStyleSheet(QStringLiteral("font-size: 11px; font-weight: bold;"));
+		filter_row->addWidget(filter_title);
+		auto* filter_group = new QButtonGroup(page);
+		filter_group->setExclusive(true);
+		const auto add_filter = [&](const QString& text, int id, bool checked = false) {
+			auto* button = new QToolButton(page);
+			button->setText(text);
+			button->setCheckable(true);
+			button->setChecked(checked);
+			button->setAutoRaise(true);
+			filter_group->addButton(button, id);
+			filter_row->addWidget(button);
+		};
+		add_filter(tr("All %1").arg(counts.total), 0, true);
+		add_filter(tr("Earned %1").arg(counts.earned), 1);
+		add_filter(tr("Remaining %1").arg(counts.total - counts.earned), 2);
+		filter_row->addStretch(1);
+		page_layout->addLayout(filter_row);
+
 		auto* list = new QListWidget(page);
 		list->setSelectionMode(QAbstractItemView::NoSelection);
 		list->setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
@@ -504,6 +527,7 @@ bool TrophyViewerDialog::LoadGame(const Configuration& info, const QString& runt
 			auto*      item            = new QListWidgetItem(list);
 			item->setSizeHint(QSize(900, 96));
 			item->setData(Qt::UserRole, id);
+			item->setData(Qt::UserRole + 1, trophy_unlocked);
 
 			auto* card = new QWidget(list);
 			card->setAttribute(Qt::WA_TransparentForMouseEvents);
@@ -555,6 +579,13 @@ bool TrophyViewerDialog::LoadGame(const Configuration& info, const QString& runt
 			row->addLayout(right, 3);
 			list->setItemWidget(item, card);
 		}
+		connect(filter_group, &QButtonGroup::idClicked, list, [list](int filter) {
+			for (int index = 0; index < list->count(); ++index) {
+				auto* item = list->item(index);
+				const bool earned = item->data(Qt::UserRole + 1).toBool();
+				item->setHidden((filter == 1 && !earned) || (filter == 2 && earned));
+			}
+		});
 		connect(list, &QListWidget::itemClicked, this,
 		        [this, trophies = std::move(package.trophies),
 		         unlocks = std::move(unlocks)](QListWidgetItem* item) {

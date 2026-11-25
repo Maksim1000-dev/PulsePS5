@@ -22,6 +22,8 @@
 #include <QObject>
 #include <QPointer>
 #include <QProcess>
+#include <QPixmap>
+#include <QPushButton>
 #include <QRadioButton>
 #include <QRegularExpression>
 #include <QSettings>
@@ -100,6 +102,7 @@ private:
 	ControllerPreview m_controller_preview;
 	TitleSound      m_title_sound;
 	QString         m_interpreter;
+	QString         m_hero_game_path;
 
 	int m_running_games = 0;
 };
@@ -152,6 +155,8 @@ void MainDialogPrivate::Setup(MainDialog* main_dialog) {
 		        }
 	        });
 	connect(m_ui->widget, &ConfigurationListWidget::Run, this, &MainDialogPrivate::Run);
+	connect(m_ui->hero_play_button, &QPushButton::clicked, m_ui->widget,
+	        &ConfigurationListWidget::RunSelectedGame);
 	connect(m_ui->check_updates_link, &QLabel::linkActivated, this,
 	        [this](const QString&) { m_update_checker->Check(true); });
 	connect(m_update_checker, &UpdateChecker::CheckingChanged, m_ui->check_updates_link,
@@ -261,6 +266,18 @@ static QStringList CreateEmulatorArgs(const Configuration& info) {
 	}
 	args << "--controller-volume" << QString::number(info.controller.speaker_volume);
 	args << "--controller-vibration" << QString::number(info.controller.vibration_intensity);
+	const auto haptics_mode = [&info] {
+		switch (info.controller.haptics_mode) {
+			case Config::ControllerHapticsMode::DualSense: return QStringLiteral("DualSense");
+			case Config::ControllerHapticsMode::Rumble: return QStringLiteral("Rumble");
+			case Config::ControllerHapticsMode::Off: return QStringLiteral("Off");
+		}
+		return QStringLiteral("DualSense");
+	}();
+	args << "--controller-haptics" << haptics_mode;
+	AddFlag(args, !info.controller.adaptive_triggers_enabled,
+	        "--disable-adaptive-triggers");
+	AddFlag(args, !info.controller.speaker_enabled, "--disable-controller-speaker");
 	args << "--keyboard-player" << QString::number(info.controller.keyboard_player);
 	args << "--present-mode" << EnumToText(info.present_mode);
 	if (info.gpu_index >= 0) {
@@ -554,6 +571,40 @@ void MainDialogPrivate::Run(const QString& activity) {
 
 void MainDialogPrivate::Update() {
 	const auto* item = m_ui->widget->GetSelectedItem();
+	if (item != nullptr) {
+		const auto& info = item->GetInfo();
+		m_ui->hero_eyebrow->setText(tr("SELECTED GAME"));
+		m_ui->hero_title->setText(info.name.isEmpty() ? info.title_id : info.name);
+		QString metadata = info.title_id;
+		if (!info.gameVersion.isEmpty()) {
+			metadata += tr(" | Version %1").arg(info.gameVersion);
+		}
+		if (!info.firmwareVer.isEmpty()) {
+			metadata += tr(" | Required system software %1").arg(info.firmwareVer);
+		}
+		m_ui->hero_metadata->setText(metadata);
+		if (m_hero_game_path != info.basedir) {
+			m_hero_game_path = info.basedir;
+			QPixmap art;
+			const auto icon = GameContent::ReadFile(
+			    info.basedir, QStringLiteral("sce_sys/icon0.png"), 4 * 1024 * 1024);
+			if (!icon.isEmpty() && art.loadFromData(icon)) {
+				m_ui->hero_art->setText(QString {});
+				m_ui->hero_art->setPixmap(art.scaled(m_ui->hero_art->size(), Qt::KeepAspectRatio,
+				                                     Qt::SmoothTransformation));
+			} else {
+				m_ui->hero_art->setPixmap(QPixmap {});
+				m_ui->hero_art->setText(QStringLiteral("PS5"));
+			}
+		}
+	} else {
+		m_hero_game_path.clear();
+		m_ui->hero_eyebrow->setText(tr("YOUR GAME LIBRARY"));
+		m_ui->hero_title->setText(tr("Choose a game to begin"));
+		m_ui->hero_metadata->setText(tr("Your PS5 library, reimagined."));
+		m_ui->hero_art->setPixmap(QPixmap {});
+		m_ui->hero_art->setText(QStringLiteral("PS5"));
+	}
 
 	bool run_enabled = item != nullptr && !item->IsRunning() && !m_update_checker->IsInstalling();
 
@@ -564,6 +615,7 @@ void MainDialogPrivate::Update() {
 	}
 
 	m_ui->widget->SetRunEnabled(run_enabled);
+	m_ui->hero_play_button->setEnabled(run_enabled);
 	m_update_checker->SetGameRunning(m_running_games > 0);
 	if (m_running_games > 0) {
 		m_controller_preview.SetSuspended(true);

@@ -10,7 +10,7 @@
 namespace {
 
 constexpr auto PS5_STYLE = R"QSS(
-/* KYTYPS5 launcher: PlayStation 5 inspired dark interface */
+/* PulsePS5 launcher: PlayStation 5 inspired dark interface */
 * {
     font-family: "Segoe UI", "Inter", "Arial";
     font-size: 10pt;
@@ -33,6 +33,55 @@ QFrame#pulse_header {
                                 stop:0 #14233b, stop:1 #0e1728);
     border: 1px solid #2c4264;
     border-radius: 16px;
+}
+
+QFrame#pulse_hero_panel {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                                stop:0 #16233a, stop:0.65 #111b2d, stop:1 #0e1728);
+    border: 1px solid #293d5d;
+    border-radius: 16px;
+}
+
+QLabel#hero_art {
+    color: #b6d6ff;
+    background-color: #1d3150;
+    border: 1px solid #3c5a82;
+    border-radius: 12px;
+    font-size: 24pt;
+    font-weight: 700;
+}
+
+QLabel#hero_eyebrow {
+    color: #79b4ff;
+    font-size: 8pt;
+    font-weight: 700;
+}
+
+QLabel#hero_title {
+    color: #f7faff;
+    font-size: 23pt;
+    font-weight: 700;
+}
+
+QLabel#hero_metadata {
+    color: #aab8cf;
+    font-size: 10pt;
+}
+
+QPushButton#hero_play_button {
+    color: #ffffff;
+    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                stop:0 #3588ff, stop:1 #1460cf);
+    border: 1px solid #77afff;
+    border-radius: 9px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    min-height: 34px;
+    padding: 2px 24px;
+}
+
+QPushButton#hero_play_button:hover {
+    background: #4594ff;
 }
 
 QLabel#pulse_brand_label {

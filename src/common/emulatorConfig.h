@@ -28,6 +28,8 @@ enum class PresentMode { Fifo, Mailbox, Immediate };
 
 enum class PssrUpscaler { Linear, DLSS, FSR };
 
+enum class ControllerHapticsMode { DualSense, Rumble, Off };
+
 // Values are the speaker types games read.
 enum class AudioOutput { TV, AVReceiver, SoundBar, Headphones };
 
@@ -54,7 +56,7 @@ constexpr bool IsConfiguredUserIdValid(int32_t user_id) {
 struct ConfigOptions {
 	uint32_t               screen_width                = 1280;
 	uint32_t               screen_height               = 720;
-	std::string            user_name                   = "Kyty";
+	std::string            user_name                   = "Pulse";
 	int32_t                user_id                     = DEFAULT_USER_ID;
 	std::string            audio_input_device;
 	AudioOutput            audio_output                = AudioOutput::TV;
@@ -62,6 +64,9 @@ struct ConfigOptions {
 	std::optional<ControllerColor> controller_color;
 	uint32_t               controller_speaker_volume      = 50;
 	uint32_t               controller_vibration_intensity = 100;
+	ControllerHapticsMode  controller_haptics_mode        = ControllerHapticsMode::DualSense;
+	bool                   controller_adaptive_triggers_enabled = true;
+	bool                   controller_speaker_enabled     = true;
 	// 0 shares player 1 with the first gamepad; 1..MAX_PLAYERS dedicates that player to the keyboard.
 	uint32_t               keyboard_player                = 0;
 	PresentMode            present_mode                = PresentMode::Mailbox;
@@ -133,6 +138,9 @@ bool Audio3dEnabled();
 const std::optional<ControllerColor>& GetControllerColor();
 uint32_t GetControllerSpeakerVolume();
 uint32_t GetControllerVibrationIntensity();
+ControllerHapticsMode GetControllerHapticsMode();
+bool AdaptiveTriggersEnabled();
+bool ControllerSpeakerEnabled();
 uint32_t GetKeyboardPlayer();
 // Player 0 is the configured user; later players derive their IDs from it.
 int32_t  GetPlayerUserId(int player);

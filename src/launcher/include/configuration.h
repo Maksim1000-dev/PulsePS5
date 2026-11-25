@@ -41,6 +41,10 @@ struct ControllerSettings {
 	QString color;
 	int     speaker_volume      = 50;
 	int     vibration_intensity = 100;
+	Config::ControllerHapticsMode haptics_mode =
+	    Config::ControllerHapticsMode::DualSense;
+	bool adaptive_triggers_enabled = true;
+	bool speaker_enabled = true;
 	// 0 shares player 1 with the first gamepad; 1..MAX_PLAYERS dedicates that player to the keyboard.
 	int     keyboard_player     = 0;
 
@@ -48,6 +52,9 @@ struct ControllerSettings {
 		s->setValue("controller_color", color);
 		s->setValue("controller_speaker_volume", speaker_volume);
 		s->setValue("controller_vibration_intensity", vibration_intensity);
+		s->setValue("controller_haptics_mode", static_cast<int>(haptics_mode));
+		s->setValue("controller_adaptive_triggers_enabled", adaptive_triggers_enabled);
+		s->setValue("controller_speaker_enabled", speaker_enabled);
 		s->setValue("controller_keyboard_player", keyboard_player);
 	}
 
@@ -61,6 +68,13 @@ struct ControllerSettings {
 		};
 		speaker_volume      = read_percent("controller_speaker_volume", 50);
 		vibration_intensity = read_percent("controller_vibration_intensity", 100);
+		const int saved_haptics_mode = s->value("controller_haptics_mode", 0).toInt();
+		haptics_mode = saved_haptics_mode >= 0 && saved_haptics_mode <= 2
+		                   ? static_cast<Config::ControllerHapticsMode>(saved_haptics_mode)
+		                   : Config::ControllerHapticsMode::DualSense;
+		adaptive_triggers_enabled =
+		    s->value("controller_adaptive_triggers_enabled", true).toBool();
+		speaker_enabled = s->value("controller_speaker_enabled", true).toBool();
 		keyboard_player = qBound(0, s->value("controller_keyboard_player", 0).toInt(),
 		                         Config::MAX_PLAYERS);
 	}
@@ -115,7 +129,7 @@ public:
 	ControllerSettings controller;
 
 	QString                screen_resolution           = QStringLiteral("1280x720");
-	QString                user_name                   = "Kyty";
+	QString                user_name                   = "Pulse";
 	int                    user_id                     = Config::DEFAULT_USER_ID;
 	QString                audio_input_device;
 	AudioOutput            audio_output                = AudioOutput::TV;

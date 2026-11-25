@@ -319,6 +319,33 @@ void TestGlobalControllerLevels() {
 	Config::Load(Config::ConfigOptions {});
 }
 
+void TestControllerOutputModes() {
+	Config::ConfigOptions options;
+	options.controller_haptics_mode = Config::ControllerHapticsMode::Off;
+	options.controller_adaptive_triggers_enabled = false;
+	Config::Load(options);
+	{
+		Controller controller;
+		SetRumble(200, 100);
+		Check(!rumble.empty() && rumble.back().large == 0 && rumble.back().small == 0,
+		      "disabled haptics did not mute ordinary rumble");
+
+		PadTriggerEffectParam param {};
+		param.trigger_mask       = 1;
+		param.command[0].mode    = 1;
+		param.command[0].data[1] = 8;
+		Check(PadSetTriggerEffect(1, &param) == 0 &&
+		          LastEffect().left_trigger[0] == 0x05,
+		      "disabled adaptive triggers did not send the off effect");
+
+		SetAxis(1, Axis::TriggerLeft, 255);
+		PadData data {};
+		Check(PadReadState(1, &data) == 0 && data.analog_buttons_l2 == 255,
+		      "disabling trigger effects changed the full analog input range");
+	}
+	Config::Load(Config::ConfigOptions {});
+}
+
 void TestVibrationLifetime() {
 	Controller controller;
 	SetRumble(255, 1);
@@ -848,6 +875,7 @@ int main() {
 	TestSpecialPortWithoutDevice();
 	TestSettingCycles();
 	TestGlobalControllerLevels();
+	TestControllerOutputModes();
 	// Each following test initializes another controller and requires strong defaults.
 	TestVibrationLifetime();
 	TestMaskedTriggersAndValidation();

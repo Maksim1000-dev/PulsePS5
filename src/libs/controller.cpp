@@ -876,7 +876,10 @@ void GameController::ApplyVibration() {
 	const auto now = SDL_GetTicks();
 	const auto duration =
 	    m_vibration_until > now ? static_cast<uint32_t>(m_vibration_until - now) : 0;
-	const auto scale       = duration != 0 ? GetSettingScale(Setting::VibrationIntensity) : 0.0f;
+	const auto scale =
+	    duration != 0 && Config::GetControllerHapticsMode() != Config::ControllerHapticsMode::Off
+	        ? GetSettingScale(Setting::VibrationIntensity)
+	        : 0.0f;
 	const auto large_motor = Scale(m_vibration[0], scale);
 	const auto small_motor = Scale(m_vibration[1], scale);
 	// The DualSense haptics backend drives a single pad, so only player 1 uses it.
@@ -958,14 +961,24 @@ bool GameController::SendTriggerEffect(const PadTriggerEffectParam& param) {
 	const auto       scale = GetSettingScale(Setting::TriggerEffectIntensity);
 	if ((param.trigger_mask & 0x01u) != 0) {
 		effect.enable_bits |= 0x08;
-		if (!trigger_effect_to_dualsense(param.command[0], effect.left_trigger, scale)) {
+		uint8_t converted[11];
+		if (!trigger_effect_to_dualsense(param.command[0], converted, scale)) {
 			return false;
+		}
+		std::copy_n(converted, sizeof(converted), effect.left_trigger);
+		if (!Config::AdaptiveTriggersEnabled()) {
+			effect.left_trigger[0] = DUALSENSE_TRIGGER_OFF;
 		}
 	}
 	if ((param.trigger_mask & 0x02u) != 0) {
 		effect.enable_bits |= 0x04;
-		if (!trigger_effect_to_dualsense(param.command[1], effect.right_trigger, scale)) {
+		uint8_t converted[11];
+		if (!trigger_effect_to_dualsense(param.command[1], converted, scale)) {
 			return false;
+		}
+		std::copy_n(converted, sizeof(converted), effect.right_trigger);
+		if (!Config::AdaptiveTriggersEnabled()) {
+			effect.right_trigger[0] = DUALSENSE_TRIGGER_OFF;
 		}
 	}
 	if (effect.enable_bits == 0) {

@@ -1,5 +1,6 @@
 #include "libs/dualSenseHaptics.h"
 
+#include "common/emulatorConfig.h"
 #include "common/logging/log.h"
 #include "common/threads.h"
 #include "libs/dualSenseBluetooth.h"
@@ -326,11 +327,14 @@ uint64_t Queue(Stream* stream, int controller, const void* data, uint32_t frames
 	if (frames == 0) {
 		return 0;
 	}
+	const bool use_rumble =
+	    Config::GetControllerHapticsMode() == Config::ControllerHapticsMode::Rumble;
 	if (!stream->speaker &&
-	    SDL_GetGamepadTypeForID(static_cast<SDL_JoystickID>(controller)) != SDL_GAMEPAD_TYPE_PS5) {
+	    (use_rumble ||
+	     SDL_GetGamepadTypeForID(static_cast<SDL_JoystickID>(controller)) != SDL_GAMEPAD_TYPE_PS5)) {
 		CloseDevice(stream);
 		stream->next_check = 0;
-		// Non-DualSense pads have no haptic audio path: approximate it with the rumble motors.
+		// When HD haptics are unavailable or disabled, approximate the stream with rumble motors.
 		float peak[2] = {0.0f, 0.0f};
 		for (uint32_t frame = 0; frame < frames; frame++) {
 			for (uint32_t ch = 0; ch < 2; ch++) {

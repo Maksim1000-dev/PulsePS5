@@ -1032,6 +1032,10 @@ endif()
 install(TARGETS kyty_emulator DESTINATION .)
 if(KYTY_BUILD_LAUNCHER)
 	add_subdirectory("${KYTY_SOURCE_DIR}/launcher" "${CMAKE_CURRENT_BINARY_DIR}/launcher")
+endif()
+
+if(BUILD_TESTING AND KYTY_BUILD_LAUNCHER)
+	add_test(NAME launcher_update_release COMMAND launcher_update_release_tests)
 
 	if(LINUX)
 		target_link_options(launcher PRIVATE $<$<CONFIG:Release>:-Wl,--strip-all>)

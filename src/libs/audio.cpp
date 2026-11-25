@@ -560,7 +560,12 @@ uint32_t Audio::AudioOutOutputs(OutputParam* params, uint32_t num, bool blocking
 
 		uint64_t controller_queued_us = 0;
 		bool controller_uses_bluetooth = false;
-		if (port.haptics != nullptr) {
+		const bool speaker_disabled =
+		    port.type == AUDIO_OUT_PORT_TYPE_PADSPK && !Config::ControllerSpeakerEnabled();
+		const bool haptics_disabled =
+		    port.type == AUDIO_OUT_PORT_TYPE_VIBRATION &&
+		    Config::GetControllerHapticsMode() == Config::ControllerHapticsMode::Off;
+		if (port.haptics != nullptr && !speaker_disabled && !haptics_disabled) {
 			// Keep the stream alive against close and volume changes.
 			Common::LockGuard lock(m_mutex);
 			controller_queued_us = Controller::DualSenseHaptics::Queue(
@@ -570,7 +575,7 @@ uint32_t Audio::AudioOutOutputs(OutputParam* params, uint32_t num, bool blocking
 			controller_uses_bluetooth =
 			    Controller::DualSenseHaptics::UsesBluetooth(port.haptics);
 		}
-		if (controller_queued_us == 0) {
+		if (controller_queued_us == 0 && !speaker_disabled && !haptics_disabled) {
 			// No DualSense took it (e.g. it was unplugged); a pad speaker port plays on the main
 			// output instead, and a vibration port has none.
 			if (QueueSdlAudio(&port, params[i].data, blocking, gain, params[i].gains)) {

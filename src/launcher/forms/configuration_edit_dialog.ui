@@ -434,11 +434,56 @@
            </layout>
           </item>
           <item row="2" column="0">
+           <widget class="QLabel" name="label_controller_haptics">
+            <property name="text"><string>HD haptic feedback:</string></property>
+           </widget>
+          </item>
+          <item row="2" column="1">
+           <layout class="QHBoxLayout" name="controllerHapticsLayout">
+            <item>
+             <widget class="QCheckBox" name="checkBox_haptics_enabled">
+              <property name="toolTip"><string>Use the DualSense HD haptic stream when supported.</string></property>
+              <property name="text"><string>Enabled</string></property>
+              <property name="checked"><bool>true</bool></property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QComboBox" name="comboBox_haptics_fallback">
+              <property name="toolTip"><string>Choose what replaces HD haptics when they are disabled.</string></property>
+             </widget>
+            </item>
+           </layout>
+          </item>
+          <item row="3" column="0">
+           <widget class="QLabel" name="label_controller_adaptive_triggers">
+            <property name="text"><string>Adaptive triggers:</string></property>
+           </widget>
+          </item>
+          <item row="3" column="1">
+           <widget class="QCheckBox" name="checkBox_adaptive_triggers">
+            <property name="toolTip"><string>Disable trigger resistance while preserving the full analog L2/R2 input range.</string></property>
+            <property name="text"><string>Enable trigger effects</string></property>
+            <property name="checked"><bool>true</bool></property>
+           </widget>
+          </item>
+          <item row="4" column="0">
+           <widget class="QLabel" name="label_controller_speaker">
+            <property name="text"><string>Controller speaker:</string></property>
+           </widget>
+          </item>
+          <item row="4" column="1">
+           <widget class="QCheckBox" name="checkBox_controller_speaker">
+            <property name="toolTip"><string>Route game audio to the DualSense speaker.</string></property>
+            <property name="text"><string>Enabled</string></property>
+            <property name="checked"><bool>true</bool></property>
+           </widget>
+          </item>
+          <item row="5" column="0">
            <widget class="QLabel" name="label_controller_volume">
             <property name="text"><string>Speaker volume:</string></property>
            </widget>
           </item>
-          <item row="2" column="1">
+          <item row="5" column="1">
            <layout class="QHBoxLayout" name="controllerVolumeLayout">
             <item>
              <widget class="QSlider" name="slider_controller_volume">
@@ -456,12 +501,12 @@
             </item>
            </layout>
           </item>
-          <item row="3" column="0">
+          <item row="6" column="0">
            <widget class="QLabel" name="label_keyboard_player">
             <property name="text"><string>Keyboard player:</string></property>
            </widget>
           </item>
-          <item row="3" column="1">
+          <item row="6" column="1">
            <widget class="QComboBox" name="comboBox_keyboard_player">
             <property name="toolTip"><string>Gamepads fill the remaining players in connection order. Every player uses the same input mapping.</string></property>
            </widget>

@@ -94,6 +94,68 @@
       </widget>
      </item>
      <item>
+      <widget class="QFrame" name="pulse_hero_panel">
+       <property name="minimumSize">
+        <size>
+         <width>0</width>
+         <height>176</height>
+        </size>
+       </property>
+       <property name="frameShape">
+        <enum>QFrame::StyledPanel</enum>
+       </property>
+       <layout class="QHBoxLayout" name="pulse_hero_layout">
+        <property name="leftMargin"><number>20</number></property>
+        <property name="topMargin"><number>14</number></property>
+        <property name="rightMargin"><number>20</number></property>
+        <property name="bottomMargin"><number>14</number></property>
+        <item>
+         <widget class="QLabel" name="hero_art">
+          <property name="minimumSize"><size><width>132</width><height>132</height></size></property>
+          <property name="maximumSize"><size><width>132</width><height>132</height></size></property>
+          <property name="text"><string>PS5</string></property>
+          <property name="alignment"><set>Qt::AlignCenter</set></property>
+         </widget>
+        </item>
+        <item>
+         <layout class="QVBoxLayout" name="pulse_hero_text_layout">
+          <property name="spacing"><number>5</number></property>
+          <item>
+           <widget class="QLabel" name="hero_eyebrow">
+            <property name="text"><string>NOW IN YOUR LIBRARY</string></property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QLabel" name="hero_title">
+            <property name="text"><string>Choose a game to begin</string></property>
+            <property name="wordWrap"><bool>true</bool></property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QLabel" name="hero_metadata">
+            <property name="text"><string>Your PS5 library, reimagined.</string></property>
+            <property name="wordWrap"><bool>true</bool></property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QPushButton" name="hero_play_button">
+            <property name="maximumSize"><size><width>180</width><height>44</height></size></property>
+            <property name="text"><string>PLAY</string></property>
+            <property name="enabled"><bool>false</bool></property>
+           </widget>
+          </item>
+         </layout>
+        </item>
+        <item>
+         <spacer name="pulse_hero_spacer">
+          <property name="orientation"><enum>Qt::Horizontal</enum></property>
+          <property name="sizeHint" stdset="0"><size><width>40</width><height>20</height></size></property>
+         </spacer>
+        </item>
+       </layout>
+      </widget>
+     </item>
+     <item>
       <layout class="QHBoxLayout" name="horizontalLayout_3">
        <item>
         <layout class="QVBoxLayout" name="verticalLayout_3">

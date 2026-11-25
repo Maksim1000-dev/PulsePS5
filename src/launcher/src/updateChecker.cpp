@@ -54,7 +54,7 @@ QNetworkRequest Request(const QUrl& url) {
 	QNetworkRequest request(url);
 	request.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
 	                     QNetworkRequest::NoLessSafeRedirectPolicy);
-	request.setRawHeader("User-Agent", "KytyPS5-Updater");
+	request.setRawHeader("User-Agent", "PulsePS5-Updater");
 	request.setTransferTimeout(30000);
 	return request;
 }
