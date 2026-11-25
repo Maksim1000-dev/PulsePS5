@@ -88,7 +88,8 @@ UpdateChecker::~UpdateChecker() {
 
 bool UpdateChecker::IsSupported() {
 #if defined(KYTY_OFFICIAL_BUILD) && defined(NDEBUG)
-	return !QString::fromLatin1(KYTY_GIT_HASH).endsWith(QStringLiteral("-dirty")) &&
+	// CI applies a build-only OpenAL patch, so official builds can have a dirty Git hash.
+	return QString::fromLatin1(KYTY_BUILD_REPOSITORY) == QStringLiteral("Maksim1000-dev/PulsePS5") &&
 	       !UpdateRelease::PlatformSuffix().isEmpty();
 #else
 	return false;
