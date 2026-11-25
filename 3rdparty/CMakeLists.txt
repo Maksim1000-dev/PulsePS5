@@ -20,6 +20,27 @@ function(kyty_add_openal)
 	else()
 		string(APPEND CMAKE_CXX_FLAGS " -fexceptions -frtti")
 	endif()
+	# GCC with libstdc++ may reject optional<array>::emplace()'s zero-argument
+	# overload for OpenAL's aggregate upsampler types. Explicitly value-initialize
+	# the array before passing it to emplace; this is equivalent and compiles there.
+	if(LINUX)
+		foreach(effect chorus distortion fshifter pshifter)
+			set(effect_file "${CMAKE_CURRENT_SOURCE_DIR}/openal-soft/alc/effects/${effect}.cpp")
+			file(READ "${effect_file}" effect_source)
+			string(FIND "${effect_source}" "auto &upsampler = mUpsampler.emplace();" unpatched_at)
+			if(unpatched_at GREATER_EQUAL 0)
+				string(REPLACE "auto &upsampler = mUpsampler.emplace();"
+					"using upsampler_t = decltype(mUpsampler)::value_type;\n        auto &upsampler = mUpsampler.emplace(upsampler_t{});"
+					effect_source "${effect_source}")
+				file(WRITE "${effect_file}" "${effect_source}")
+			else()
+				string(FIND "${effect_source}" "mUpsampler.emplace(upsampler_t{});" patched_at)
+				if(patched_at LESS 0)
+					message(FATAL_ERROR "Unexpected OpenAL upsampler initialization in ${effect_file}")
+				endif()
+			endif()
+		endforeach()
+	endif()
 	# OpenAL builds its private copy of fmt.
 	get_directory_property(kyty_includes INCLUDE_DIRECTORIES)
 	set_directory_properties(PROPERTIES INCLUDE_DIRECTORIES "")
@@ -81,7 +102,7 @@ function(kyty_fetch_noto_sans path sha256)
 endfunction()
 kyty_fetch_noto_sans(LICENSE f2095b08bed08b23a6fe26112fcd679a2bee3f002eef077eb05d215ed1051bd8)
 kyty_fetch_noto_sans(NotoSans/hinted/ttf/NotoSans-Regular.ttf
-	478c558ea716033cd60c03438f628dfa75694dcf6b5f6d505a2f05fd2b4f3823)
+	478c558ea716033cd60c03438f628dfa75694dcf6b5f6d505f05fd2b4f3823)
 kyty_fetch_noto_sans(NotoSans/hinted/ttf/NotoSans-Bold.ttf
 	1df075a380fc7cb898acf64c1f7b3b4dd780de3caa860178bf929de35817a913)
 kyty_fetch_noto_sans(NotoSans/hinted/ttf/NotoSans-Italic.ttf
