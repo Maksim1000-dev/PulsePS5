@@ -429,6 +429,12 @@ add_executable(archive_file_tests EXCLUDE_FROM_ALL
 target_link_libraries(archive_file_tests common ZArchive::zarchive)
 target_include_directories(archive_file_tests PRIVATE ${inc_headers})
 
+add_executable(ffpfsc_archive_tests EXCLUDE_FROM_ALL
+	"${KYTY_TESTS_DIR}/FFPFSCArchiveTests.cpp"
+)
+target_link_libraries(ffpfsc_archive_tests common zlibstatic)
+target_include_directories(ffpfsc_archive_tests PRIVATE ${inc_headers})
+
 add_executable(trophy_system_tests EXCLUDE_FROM_ALL
 	"${KYTY_TESTS_DIR}/TrophySystemTests.cpp"
 )
@@ -761,6 +767,7 @@ if(BUILD_TESTING)
 	add_test(NAME page_manager COMMAND $<TARGET_FILE:page_manager_tests>)
 	add_test(NAME build_flags COMMAND $<TARGET_FILE:build_flags_tests>)
 	add_test(NAME archive_file COMMAND $<TARGET_FILE:archive_file_tests>)
+	add_test(NAME ffpfsc_archive COMMAND $<TARGET_FILE:ffpfsc_archive_tests>)
 	add_test(NAME trophy_system COMMAND $<TARGET_FILE:trophy_system_tests>)
 	add_test(NAME avplayer_file COMMAND $<TARGET_FILE:avplayer_file_tests>)
 	add_test(NAME vdecsw COMMAND $<TARGET_FILE:vdecsw_tests>)
@@ -883,6 +890,7 @@ if(BUILD_TESTING)
 		page_manager_tests
 		build_flags_tests
 		archive_file_tests
+		ffpfsc_archive_tests
 		trophy_system_tests
 		avplayer_file_tests
 		vdecsw_tests
@@ -1036,6 +1044,7 @@ endif()
 
 if(BUILD_TESTING AND KYTY_BUILD_LAUNCHER)
 	add_test(NAME launcher_update_release COMMAND launcher_update_release_tests)
+	add_test(NAME launcher_game_views COMMAND launcher_game_views_tests)
 
 	if(LINUX)
 		target_link_options(launcher PRIVATE $<$<CONFIG:Release>:-Wl,--strip-all>)

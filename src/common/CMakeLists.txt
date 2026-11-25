@@ -41,6 +41,7 @@ target_link_libraries(common
 		kyty_git_version
 		spdlog::spdlog
 		ZArchive::zarchive
+		zlibstatic
 		nlohmann_json::nlohmann_json
 )
 if(APPLE)

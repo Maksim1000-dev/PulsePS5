@@ -68,6 +68,16 @@ QLabel#hero_metadata {
     font-size: 10pt;
 }
 
+QLabel#hero_status {
+    color: #b6d6ff;
+    background-color: #1b3150;
+    border: 1px solid #365783;
+    border-radius: 9px;
+    font-size: 8pt;
+    font-weight: 700;
+    padding: 4px 10px;
+}
+
 QPushButton#hero_play_button {
     color: #ffffff;
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1,

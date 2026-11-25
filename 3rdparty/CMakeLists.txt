@@ -55,6 +55,20 @@ add_subdirectory(cpuinfo)
 
 include(FetchContent)
 
+# FFPFSC payloads use zlib-compressed PFSC blocks.
+set(ZLIB_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(SKIP_INSTALL_ALL ON)
+FetchContent_Declare(
+	zlib
+	GIT_REPOSITORY https://github.com/madler/zlib.git
+	GIT_TAG 51b7f2abdade71cd9bb0e7a373ef2610ec6f9daf
+	GIT_SHALLOW FALSE
+)
+FetchContent_MakeAvailable(zlib)
+unset(SKIP_INSTALL_ALL)
+set_property(TARGET zlib PROPERTY EXCLUDE_FROM_ALL TRUE)
+install(FILES "${zlib_SOURCE_DIR}/LICENSE" DESTINATION licenses/zlib)
+
 # The Bluetooth DualSense transports speaker audio as fixed-size Opus packets.
 set(kyty_build_testing_saved "${BUILD_TESTING}")
 set(BUILD_TESTING OFF)

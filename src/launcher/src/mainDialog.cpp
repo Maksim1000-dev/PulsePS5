@@ -244,6 +244,17 @@ static void AddFlag(QStringList& args, bool enabled, const char* name) {
 	}
 }
 
+static QString GameStatusLabel(Configuration::GameStatus status) {
+	switch (status) {
+		case Configuration::GameStatus::InGame: return QObject::tr("IN GAME");
+		case Configuration::GameStatus::Logo: return QObject::tr("LOGO");
+		case Configuration::GameStatus::DoesntBoot: return QObject::tr("DOESN'T BOOT");
+		case Configuration::GameStatus::MainMenu: return QObject::tr("MAIN MENU");
+		case Configuration::GameStatus::Unknown: return {};
+	}
+	return {};
+}
+
 static QStringList CreateEmulatorArgs(const Configuration& info) {
 	QStringList args;
 	auto        r = Configuration::NormalizeResolution(info.screen_resolution).split('x');
@@ -583,6 +594,9 @@ void MainDialogPrivate::Update() {
 			metadata += tr(" | Required system software %1").arg(info.firmwareVer);
 		}
 		m_ui->hero_metadata->setText(metadata);
+		m_ui->hero_status->setText(GameStatusLabel(info.game_status));
+		m_ui->hero_status->setToolTip(info.game_comment);
+		m_ui->hero_status->setVisible(info.game_status != Configuration::GameStatus::Unknown);
 		if (m_hero_game_path != info.basedir) {
 			m_hero_game_path = info.basedir;
 			QPixmap art;
@@ -602,6 +616,9 @@ void MainDialogPrivate::Update() {
 		m_ui->hero_eyebrow->setText(tr("YOUR GAME LIBRARY"));
 		m_ui->hero_title->setText(tr("Choose a game to begin"));
 		m_ui->hero_metadata->setText(tr("Your PS5 library, reimagined."));
+		m_ui->hero_status->clear();
+		m_ui->hero_status->setToolTip({});
+		m_ui->hero_status->hide();
 		m_ui->hero_art->setPixmap(QPixmap {});
 		m_ui->hero_art->setText(QStringLiteral("PS5"));
 	}
