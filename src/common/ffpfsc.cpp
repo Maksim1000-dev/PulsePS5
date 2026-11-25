@@ -152,6 +152,9 @@ public:
 		const auto requested = static_cast<size_t>(std::min<uint64_t>(size, node.size - offset));
 		size_t     done      = 0;
 		std::lock_guard lock(m_mutex);
+		if (node.from_pfs) {
+			return ReadLogical(node.image_offset + offset, requested, data) ? requested : 0;
+		}
 		while (done < requested) {
 			const uint64_t file_offset = offset + done;
 			const uint64_t cluster_idx = file_offset / m_cluster_size;
@@ -179,7 +182,9 @@ private:
 		std::string name;
 		std::string path;
 		uint64_t    size      = 0;
+		uint64_t    image_offset = 0;
 		bool        is_file   = false;
+		bool        from_pfs  = false;
 		std::vector<uint64_t> children;
 		std::vector<uint32_t> clusters;
 	};
@@ -275,20 +280,27 @@ private:
 	}
 
 	bool Initialize() {
-		if (m_file.IsInvalid() || !ReadPfs() || !ReadPfsc() || !ReadExfat()) {
+		if (m_file.IsInvalid() || !ReadPfs() || !ReadPfsc() || !ReadImage()) {
 			return false;
 		}
 		return true;
 	}
 
-	bool ReadPfsDirectory(const PfsInode& inode, std::vector<PfsDirent>& entries) {
+	bool ReadPfsDirectory(const PfsInode& inode, uint32_t block_size,
+	                      std::vector<PfsDirent>& entries, bool from_image = false) {
 		if (inode.size > kMaxExfatDirectory || inode.first_block <= 0 ||
 		    inode.block_count == 0) {
 			return false;
 		}
 		std::vector<uint8_t> bytes(static_cast<size_t>(inode.size));
-		const auto offset = static_cast<uint64_t>(inode.first_block) * m_pfs_block_size;
-		if (!IsRangeValid(offset, inode.size, m_file.Size()) || !ReadHost(offset, bytes.size(), bytes.data())) {
+		const auto offset = static_cast<uint64_t>(inode.first_block) * block_size;
+		const auto inode_count = from_image ? m_inner_inodes.size() : m_inodes.size();
+		const bool read_ok =
+		    from_image ? IsRangeValid(offset, inode.size, m_image_size) &&
+		                     ReadLogical(offset, bytes.size(), bytes.data())
+		               : IsRangeValid(offset, inode.size, m_file.Size()) &&
+		                     ReadHost(offset, bytes.size(), bytes.data());
+		if (!read_ok) {
 			return false;
 		}
 
@@ -301,7 +313,7 @@ private:
 				break;
 			}
 			if (entry_size < 16 || (entry_size & 7u) != 0 || name_size > entry_size - 16 ||
-			    entry_size > bytes.size() - at || inode_id >= m_inodes.size()) {
+			    entry_size > bytes.size() - at || inode_id >= inode_count) {
 				return false;
 			}
 			std::string name(reinterpret_cast<const char*>(bytes.data() + at + 16), name_size);
@@ -370,7 +382,7 @@ private:
 		}
 
 		std::vector<PfsDirent> super_root;
-		if (!ReadPfsDirectory(m_inodes[0], super_root)) {
+		if (!ReadPfsDirectory(m_inodes[0], m_pfs_block_size, super_root)) {
 			return false;
 		}
 		bool has_path_table = false;
@@ -384,7 +396,7 @@ private:
 		}
 
 		std::vector<PfsDirent> user_root;
-		if (!ReadPfsDirectory(m_inodes[2], user_root)) {
+		if (!ReadPfsDirectory(m_inodes[2], m_pfs_block_size, user_root)) {
 			return false;
 		}
 		size_t payload_entries = 0;
@@ -392,7 +404,8 @@ private:
 			if (entry.inode == 2 && entry.type == 4 && entry.name == ".") {
 				continue;
 			}
-			if (entry.inode == 0 && entry.type == 5 && entry.name == "..") {
+			if ((entry.inode == 0 || entry.inode == 2) && entry.type == 5 &&
+			    entry.name == "..") {
 				continue;
 			}
 			if (entry.inode != 3 || entry.type != 2 || entry.name.empty()) {
@@ -454,6 +467,156 @@ private:
 		}
 		return m_block_offsets.front() == data_offset &&
 		       m_block_offsets.back() <= m_payload_size;
+	}
+
+	bool ReadImage() {
+		std::array<uint8_t, 0x10> header {};
+		if (!ReadLogical(0, header.size(), header.data())) {
+			return false;
+		}
+		if (Load64(header.data()) == 2 && Load64(header.data() + 8) == kPfsMagic) {
+			return ReadInnerPfs();
+		}
+		return ReadExfat();
+	}
+
+	bool ReadInnerPfs() {
+		std::array<uint8_t, 0x100> header {};
+		if (!ReadLogical(0, header.size(), header.data()) ||
+		    Load64(header.data()) != 2 || Load64(header.data() + 8) != kPfsMagic) {
+			return false;
+		}
+		const auto mode = Load16(header.data() + 0x1C);
+		if ((mode & ~0x8u) != 0) {
+			return false;
+		}
+		m_inner_pfs_block_size = Load32(header.data() + 0x20);
+		const auto inode_count  = Load64(header.data() + 0x30);
+		const auto block_count  = Load64(header.data() + 0x38);
+		const auto inode_blocks = Load64(header.data() + 0x40);
+		if (m_inner_pfs_block_size < 0x1000 || m_inner_pfs_block_size > 0x100000 ||
+		    (m_inner_pfs_block_size & (m_inner_pfs_block_size - 1)) != 0 ||
+		    inode_count == 0 || inode_count > kMaxPfsInodes || inode_blocks == 0 ||
+		    block_count > std::numeric_limits<uint64_t>::max() / m_inner_pfs_block_size ||
+		    block_count * m_inner_pfs_block_size > m_image_size || inode_blocks >= block_count ||
+		    inode_count > inode_blocks * (m_inner_pfs_block_size / kPfsInodeSize)) {
+			return false;
+		}
+
+		std::vector<uint8_t> inode_data(static_cast<size_t>(inode_count) * kPfsInodeSize);
+		if (!ReadLogical(m_inner_pfs_block_size, inode_data.size(), inode_data.data())) {
+			return false;
+		}
+		m_inner_inodes.resize(static_cast<size_t>(inode_count));
+		for (size_t i = 0; i < m_inner_inodes.size(); ++i) {
+			const auto* record = inode_data.data() + i * kPfsInodeSize;
+			auto&       inode  = m_inner_inodes[i];
+			inode.mode         = Load16(record);
+			inode.flags        = Load32(record + 4);
+			inode.size         = Load64(record + 8);
+			inode.logical_size = Load64(record + 0x10);
+			inode.block_count  = Load32(record + 0x60);
+			inode.first_block  = static_cast<int32_t>(Load32(record + 0x64));
+
+			const auto file_type = inode.mode & 0xF000u;
+			if ((file_type != 0x4000u && file_type != 0x8000u) ||
+			    inode.size > static_cast<uint64_t>(inode.block_count) *
+			                     m_inner_pfs_block_size ||
+			    (inode.size != 0 &&
+			     (inode.first_block <= 0 || inode.block_count == 0 ||
+			      static_cast<uint64_t>(inode.first_block) < 1 + inode_blocks ||
+			      static_cast<uint64_t>(inode.first_block) >= block_count ||
+			      inode.block_count > block_count - static_cast<uint64_t>(inode.first_block)))) {
+				return false;
+			}
+		}
+
+		std::vector<PfsDirent> super_root;
+		if (!ReadPfsDirectory(m_inner_inodes[0], m_inner_pfs_block_size, super_root, true)) {
+			return false;
+		}
+		bool     has_path_table = false;
+		uint32_t user_root      = 0;
+		for (const auto& entry: super_root) {
+			has_path_table |= entry.inode == 1 && entry.type == 2 &&
+			                  entry.name == "flat_path_table";
+			if (entry.type == 3 && entry.name == "uroot") {
+				if (user_root != 0 || entry.inode >= m_inner_inodes.size()) {
+					return false;
+				}
+				user_root = entry.inode;
+			}
+		}
+		if (!has_path_table || user_root == 0 ||
+		    (m_inner_inodes[user_root].mode & 0xF000u) != 0x4000u) {
+			return false;
+		}
+
+		m_nodes.clear();
+		m_paths.clear();
+		m_nodes.emplace_back();
+		m_paths.emplace(std::string {}, 0);
+		std::unordered_set<uint32_t> visiting;
+		return ParseInnerPfsDirectory(user_root, 0, 0, visiting);
+	}
+
+	bool ParseInnerPfsDirectory(uint32_t inode_id, uint64_t parent_id, uint64_t depth,
+	                            std::unordered_set<uint32_t>& visiting) {
+		if (depth > kMaxExfatDepth || inode_id >= m_inner_inodes.size() ||
+		    m_nodes.size() > kMaxExfatEntries || !visiting.insert(inode_id).second) {
+			return false;
+		}
+		const auto& inode = m_inner_inodes[inode_id];
+		std::vector<PfsDirent> entries;
+		if (!ReadPfsDirectory(inode, m_inner_pfs_block_size, entries, true)) {
+			return false;
+		}
+
+		for (const auto& entry: entries) {
+			if (entry.name == "." || entry.name == "..") {
+				continue;
+			}
+			if (entry.name.empty() || entry.name.find_first_of("/\\") != std::string::npos ||
+			    entry.inode >= m_inner_inodes.size() ||
+			    (entry.type != 2 && entry.type != 3)) {
+				return false;
+			}
+			const auto& child_inode = m_inner_inodes[entry.inode];
+			const auto  file_type   = child_inode.mode & 0xF000u;
+			const bool  is_directory = entry.type == 3;
+			if ((is_directory && file_type != 0x4000u) ||
+			    (!is_directory && file_type != 0x8000u)) {
+				return false;
+			}
+
+			const auto& parent = m_nodes[parent_id];
+			const auto  path   = parent.path.empty() ? entry.name : parent.path + "/" + entry.name;
+			const auto  key    = FoldAscii(path);
+			if (m_paths.contains(key) || m_nodes.size() >= kMaxExfatEntries) {
+				return false;
+			}
+
+			Node child;
+			child.name          = entry.name;
+			child.path          = path;
+			child.size          = is_directory ? 0 : child_inode.size;
+			child.image_offset  = static_cast<uint64_t>(child_inode.first_block) *
+			                     m_inner_pfs_block_size;
+			child.is_file       = !is_directory;
+			child.from_pfs      = true;
+			const auto child_id = static_cast<uint64_t>(m_nodes.size());
+			m_nodes.push_back(std::move(child));
+			m_paths.emplace(key, child_id);
+			m_nodes[parent_id].children.push_back(child_id);
+
+			if (is_directory &&
+			    (child_inode.size == 0 ||
+			     !ParseInnerPfsDirectory(entry.inode, child_id, depth + 1, visiting))) {
+				return false;
+			}
+		}
+		visiting.erase(inode_id);
+		return true;
 	}
 
 	uint32_t FatEntry(uint32_t cluster) const {
@@ -695,10 +858,12 @@ private:
 	File m_file;
 	std::mutex m_mutex;
 	uint32_t m_pfs_block_size = 0;
+	uint32_t m_inner_pfs_block_size = 0;
 	uint64_t m_payload_offset = 0;
 	uint64_t m_payload_size = 0;
 	uint64_t m_image_size = 0;
 	std::vector<PfsInode> m_inodes;
+	std::vector<PfsInode> m_inner_inodes;
 	std::vector<uint64_t> m_block_offsets;
 	std::vector<uint8_t> m_compressed = std::vector<uint8_t>(kPfscBlockSize);
 	std::array<PfscCacheBlock, 4> m_cache {};

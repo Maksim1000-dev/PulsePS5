@@ -160,6 +160,37 @@ void AddInode(std::vector<uint8_t>& pfs, uint32_t id, uint16_t mode, uint32_t fl
 	Store32(inode + 0x64, static_cast<uint32_t>(first_block));
 }
 
+std::vector<uint8_t> MakePfsImage(const std::vector<uint8_t>& eboot) {
+	constexpr uint32_t pfs_blocks = 7;
+	std::vector<uint8_t> pfs(static_cast<size_t>(pfs_blocks) * kBlockSize, 0);
+	Store64(pfs.data(), 2);
+	Store64(pfs.data() + 8, 20130315);
+	Store16(pfs.data() + 0x1C, 0x8);
+	Store32(pfs.data() + 0x20, kBlockSize);
+	Store64(pfs.data() + 0x28, 1);
+	Store64(pfs.data() + 0x30, 4);
+	Store64(pfs.data() + 0x38, pfs_blocks);
+	Store64(pfs.data() + 0x40, 1);
+
+	AddInode(pfs, 0, 0x416D, 0x20010, kBlockSize, kBlockSize, 1, 2);
+	AddInode(pfs, 1, 0x816D, 0x20010, 8, 8, 1, 3);
+	AddInode(pfs, 2, 0x416D, 0x10, kBlockSize, kBlockSize, 1, 5);
+	AddInode(pfs, 3, 0x816D, 0x10, eboot.size(), eboot.size(), 1, 6);
+
+	std::vector<uint8_t> root;
+	AddDirent(root, 1, 2, "flat_path_table");
+	AddDirent(root, 2, 3, "uroot");
+	std::copy(root.begin(), root.end(), pfs.begin() + 2 * kBlockSize);
+
+	std::vector<uint8_t> user_root;
+	AddDirent(user_root, 2, 4, ".");
+	AddDirent(user_root, 2, 5, "..");
+	AddDirent(user_root, 3, 2, "eboot.bin");
+	std::copy(user_root.begin(), user_root.end(), pfs.begin() + 5 * kBlockSize);
+	std::copy(eboot.begin(), eboot.end(), pfs.begin() + 6 * kBlockSize);
+	return pfs;
+}
+
 std::vector<uint8_t> MakeFFPFSC(const std::vector<uint8_t>& exfat, bool compress) {
 	const auto block_count = (exfat.size() + kBlockSize - 1) / kBlockSize;
 	std::vector<uint8_t> pfsc(kBlockSize, 0);
@@ -222,7 +253,7 @@ std::vector<uint8_t> MakeFFPFSC(const std::vector<uint8_t>& exfat, bool compress
 
 	std::vector<uint8_t> user_root;
 	AddDirent(user_root, 2, 4, ".");
-	AddDirent(user_root, 0, 5, "..");
+	AddDirent(user_root, 2, 5, "..");
 	AddDirent(user_root, 3, 2, "game.exfat");
 	std::copy(user_root.begin(), user_root.end(), pfs.begin() + 5 * kBlockSize);
 
@@ -288,12 +319,31 @@ void CheckCorruptPfsc(const std::filesystem::path& path) {
 	Check(!Common::OpenArchive(path), "reject PFSC offsets outside the payload");
 }
 
+void CheckNestedPfsImage(const std::filesystem::path& path) {
+	std::vector<uint8_t> eboot(1300);
+	for (size_t i = 0; i < eboot.size(); ++i) {
+		eboot[i] = static_cast<uint8_t>((i * 13 + i / 5) % 251);
+	}
+	const auto image = MakeFFPFSC(MakePfsImage(eboot), true);
+	WriteFile(path, image);
+
+	const auto root = Common::MakeArchivePath(path);
+	Check(Common::File::IsFileExisting(root / "eboot.bin"),
+	      "find eboot.bin in the PFSC-compressed PFS image");
+	Common::File file(root / "eboot.bin", Common::File::Mode::Read);
+	const auto actual = file.ReadWholeBuffer();
+	Check(actual.size() == eboot.size() &&
+	          std::memcmp(actual.data(), eboot.data(), eboot.size()) == 0,
+	      "read eboot.bin from the PFSC-compressed PFS image");
+}
+
 } // namespace
 
 int main() {
 	TemporaryDirectory temporary;
 	CheckValidImage(temporary.Path() / "compressed.ffpfsc", true);
 	CheckValidImage(temporary.Path() / "raw.ffpfsc", false);
+	CheckNestedPfsImage(temporary.Path() / "nested_pfs.ffpfsc");
 	CheckCorruptPfsc(temporary.Path() / "corrupt.ffpfsc");
 
 	std::vector<uint8_t> invalid(0x10000, 0);
