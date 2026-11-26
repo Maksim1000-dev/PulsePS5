@@ -1,6 +1,6 @@
-# KytyPS5-Plus
+# PulsePS5
 
-**KytyPS5-Plus** is a custom enhanced fork of the experimental PlayStation 5 emulator [KytyPS5](https://github.com), focused on shader recompiler workarounds, improved runtime stability, and better playability in **Grand Theft Auto V**, **Astro Bot**, **Astro's Playroom**, **Minecraft Dungeons II**, and more PS5 titles.
+**PulsePS5** is a custom enhanced fork of the experimental PlayStation 5 emulator [KytyPS5](https://github.com), focused on shader recompiler workarounds, improved runtime stability, and better playability in **Grand Theft Auto V**, **Astro Bot**, **Astro's Playroom**, **Minecraft Dungeons II**, and more PS5 titles.
 
 ## ✨ Key Improvements & Fixes
 
@@ -12,5 +12,5 @@
 
 ## ⚠️ Notes
 
-* Based on the upstream [KytyPS5]([https://github.com/K](https://github.com/KytyPS5/KytyPS5)) project. Intended strictly for research and running legally owned game backups.
+* Based on the upstream [KytyPS5]((https://github.com/KytyPS5/KytyPS5)) project. Intended strictly for research and running legally owned game backups.
 * After replacing `KytyPS5.exe` with a patched build, it is recommended to clear your old `shader_cache` folder so affected shaders recompile cleanly.
