@@ -5528,6 +5528,12 @@ public:
       constexpr uint64_t index_page = BufferCache::CACHING_PAGESIZE;
       constexpr uint64_t index_span = 3 * index_page;
       const uint64_t index_begin = base + index_offset;
+      const auto invalid_buffer_id = cache.FindBuffer(
+          Libs::Graphics::LOWER_ADDRESS_SIZE - 1, 2);
+      Require(name, "invalid buffer discovery fallback",
+              invalid_buffer_id == Libs::Graphics::NULL_BUFFER_ID &&
+                  cache.GetBuffer(invalid_buffer_id).Size() == 16,
+              "invalid guest range did not resolve to the null dummy buffer");
       Require(name, "registered-range empty lookup",
               !cache.IsRegionRegistered(index_begin, index_span) &&
                   !BufferCacheTestAccess::PageOwner(cache, index_begin),

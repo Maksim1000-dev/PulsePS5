@@ -249,6 +249,7 @@ BufferCache::BufferCache(GraphicContext& graphics, CommandScheduler& scheduler,
 	    m_slot_buffers.insert(m_graphics, m_scheduler, MemoryUsage::DeviceLocal, 0, AllFlags, 16);
 	EXIT_IF(null_id != NULL_BUFFER_ID);
 	SetVulkanObjectNameF(m_graphics.device, GetBuffer(null_id).Handle(), "Kyty.NullBuffer");
+	GetBuffer(null_id).Fill(0, GetBuffer(null_id).Size(), 0);
 	if (!m_graphics.CanReportMemoryUsage()) {
 		return;
 	}
@@ -314,7 +315,10 @@ BufferId BufferCache::FindBuffer(uint64_t vaddr, uint64_t size) {
 		return NULL_BUFFER_ID;
 	}
 	if (!GuestRange {vaddr, size}.Valid()) {
-		EXIT("BufferCache: invalid buffer discovery request\n");
+		LOGF("Warning: ignoring invalid buffer discovery request: address=0x%016" PRIx64
+		     " size=0x%016" PRIx64 " (invalid guest address range)\n",
+		     vaddr, size);
+		return NULL_BUFFER_ID;
 	}
 	const auto* owner = m_page_table.Find(vaddr >> PageTable::kPageBits);
 	if (owner != nullptr && *owner) {
