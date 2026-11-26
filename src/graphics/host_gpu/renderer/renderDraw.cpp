@@ -618,6 +618,15 @@ struct PreparedIndexBuffer {
 	vk::IndexType  type   = vk::IndexType::eUint16;
 };
 
+static void WarnInvalidDrawBufferRange(const char* type, uint64_t address, uint64_t size) {
+	static std::atomic<uint32_t> warning_count {0};
+	if (warning_count.fetch_add(1, std::memory_order_relaxed) < 16) {
+		LOGF("Warning: ignoring draw with invalid %s buffer: address=0x%016" PRIx64
+		     " size=0x%016" PRIx64 "\n",
+		     type, address, size);
+	}
+}
+
 static uint64_t VertexBufferDescriptorSize(int binding, const ShaderVertexInputInfo& info) {
 	const auto& buffer = info.buffers[binding];
 	if (buffer.stride != 0 || buffer.num_records == 0) {
@@ -677,9 +686,10 @@ static void AcquireVertexBuffers(CommandBuffer& buffer, const ShaderVertexInputI
 		if (size == 0) {
 			continue;
 		}
-		if (vertex.addr == 0 || size > UINT64_MAX - vertex.addr) {
-			EXIT("invalid vertex buffer range: addr=0x%016" PRIx64 " size=0x%016" PRIx64 "\n",
-			     vertex.addr, size);
+		if (!GuestRange {vertex.addr, size}.Valid()) {
+			WarnInvalidDrawBufferRange("vertex", vertex.addr, size);
+			sizes[i] = 0;
+			continue;
 		}
 		ranges[range_count++] = {.base_address = vertex.addr, .requested_end = vertex.addr + size};
 	}
@@ -1067,12 +1077,46 @@ void RenderExecutor::ExecutePreparedDraw(CommandBuffer& buffer, const DrawCallIn
                                          const DrawIndexBufferSource& index_source) {
 	auto&      ucfg                     = buffer.GetUserConfig();
 	const bool primitive_restart_enable = state.primitive_restart_enable;
+	if (draw.indexed && index_source.host_data == nullptr && index_source.size != 0 &&
+	    !GuestRange {index_source.address, index_source.size}.Valid()) {
+		WarnInvalidDrawBufferRange("index", index_source.address, index_source.size);
+		return;
+	}
+	if (emit.indirect.address != 0) {
+		const auto command_size =
+		    draw.indexed ? sizeof(vk::DrawIndexedIndirectCommand) : sizeof(vk::DrawIndirectCommand);
+		if (emit.indirect.count == 0 ||
+		    (emit.indirect.count > 1 && emit.indirect.stride == 0)) {
+			WarnInvalidDrawBufferRange("indirect", emit.indirect.address, 0);
+			return;
+		}
+		const auto additional_count = static_cast<uint64_t>(emit.indirect.count - 1);
+		if (additional_count >
+		    (UINT64_MAX - command_size) / std::max(emit.indirect.stride, 1u)) {
+			WarnInvalidDrawBufferRange("indirect", emit.indirect.address, UINT64_MAX);
+			return;
+		}
+		const auto indirect_size = additional_count * emit.indirect.stride + command_size;
+		if (!GuestRange {emit.indirect.address, indirect_size}.Valid()) {
+			WarnInvalidDrawBufferRange("indirect", emit.indirect.address, indirect_size);
+			return;
+		}
+	}
 	if (CopyDepthToColor(buffer, draw, emit, state)) {
 		return;
 	}
 	const auto  vertex_stages = state.VertexStages();
 	const bool  mesh_active   = state.vertex_info[0].stage.module->info.stage == ShaderType::Mesh;
 	const bool  mesh_task     = state.vertex_info[0].stage.module->mesh_task;
+	if (mesh_active && draw.indexed && index_source.host_data == nullptr &&
+	    index_source.size != 0) {
+		const auto index_begin = index_source.address & ~uint64_t {3};
+		const auto index_end   = (index_source.address + index_source.size + 3u) & ~uint64_t {3};
+		if (!GuestRange {index_begin, index_end - index_begin}.Valid()) {
+			WarnInvalidDrawBufferRange("mesh index", index_begin, index_end - index_begin);
+			return;
+		}
+	}
 	const auto& mesh          = state.vertex_info[0].mesh;
 	const auto& limits        = m_context.GetGraphics().mesh_shader_properties;
 	uint32_t    mesh_groups   = 0;

@@ -15,6 +15,7 @@
 #include "kernel/memory.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cinttypes>
 #include <cstring>
 #include <memory>
@@ -29,6 +30,16 @@ constexpr uint64_t MiB           = 1024 * 1024;
 constexpr uint64_t GdsBufferSize = 64 * 1024;
 // GPU-modified ranges come as many small scattered islands, so a readback widens to a window.
 constexpr uint64_t DownloadWindowSize = 512 * 1024;
+
+void WarnInvalidBufferRequest(const char* operation, uint64_t address, uint64_t size,
+                              uint32_t parameters = 0) {
+	static std::atomic<uint32_t> warning_count {0};
+	if (warning_count.fetch_add(1, std::memory_order_relaxed) < 32) {
+		LOGF("Warning: ignoring invalid buffer %s request: address=0x%016" PRIx64
+		     " size=0x%016" PRIx64 " parameters=0x%08x\n",
+		     operation, address, size, parameters);
+	}
+}
 
 std::pair<Buffer*, uint64_t> UploadMemory(GraphicContext& graphics, CommandScheduler& scheduler,
                                         StreamBuffer& staging, uint64_t size, uint64_t alignment,
@@ -278,12 +289,20 @@ BufferCache::~BufferCache() {
 }
 
 void BufferCache::InvalidateMemory(uint64_t vaddr, uint64_t size) {
+	if (!GuestRange {vaddr, size}.Valid()) {
+		WarnInvalidBufferRequest("invalidation", vaddr, size);
+		return;
+	}
 	m_memory_tracker.InvalidateRegion(vaddr, size,
 	                                  [this, vaddr, size] { ReadMemory(vaddr, size, true); });
 	QueueBdaSync(vaddr, size);
 }
 
 void BufferCache::ReadMemory(uint64_t vaddr, uint64_t size, bool is_write) {
+	if (!GuestRange {vaddr, size}.Valid()) {
+		WarnInvalidBufferRequest("readback", vaddr, size, static_cast<uint32_t>(is_write));
+		return;
+	}
 	if (!GuestGpu::IsGpuThread() && CommandScheduler::InDeferredOperation()) {
 		EXIT("unsupported buffer readback from an asynchronous GPU completion, "
 		     "addr=0x%016" PRIx64 " size=0x%016" PRIx64 "\n",
@@ -315,9 +334,7 @@ BufferId BufferCache::FindBuffer(uint64_t vaddr, uint64_t size) {
 		return NULL_BUFFER_ID;
 	}
 	if (!GuestRange {vaddr, size}.Valid()) {
-		LOGF("Warning: ignoring invalid buffer discovery request: address=0x%016" PRIx64
-		     " size=0x%016" PRIx64 " (invalid guest address range)\n",
-		     vaddr, size);
+		WarnInvalidBufferRequest("discovery", vaddr, size);
 		return NULL_BUFFER_ID;
 	}
 	const auto* owner = m_page_table.Find(vaddr >> PageTable::kPageBits);
@@ -485,7 +502,12 @@ void BufferCache::UploadCopies(std::span<const BufferUpload> uploads,
 std::pair<Buffer*, uint64_t> BufferCache::ObtainBuffer(uint64_t vaddr, uint64_t size,
                                                        bool is_written, bool is_texel_buffer,
                                                        BufferId id) {
-	EXIT_IF(!(GuestRange {vaddr, size}.Valid()));
+	if (!GuestRange {vaddr, size}.Valid()) {
+		WarnInvalidBufferRequest("acquisition", vaddr, size,
+		                         static_cast<uint32_t>(is_written) |
+		                             (static_cast<uint32_t>(is_texel_buffer) << 1u));
+		return {&GetBuffer(NULL_BUFFER_ID), 0};
+	}
 
 	if (!is_written && size <= CACHING_PAGESIZE &&
 	    !m_memory_tracker.IsRegionGpuModified(vaddr, size) &&
@@ -527,6 +549,10 @@ std::pair<Buffer*, uint64_t> BufferCache::ObtainBuffer(uint64_t vaddr, uint64_t 
 }
 
 std::pair<Buffer*, uint64_t> BufferCache::ObtainBufferForImage(uint64_t vaddr, uint64_t size) {
+	if (!GuestRange {vaddr, size}.Valid()) {
+		WarnInvalidBufferRequest("image acquisition", vaddr, size);
+		return {&GetBuffer(NULL_BUFFER_ID), 0};
+	}
 	const auto* owner = m_page_table.Find(vaddr >> PageTable::kPageBits);
 	if (owner != nullptr && *owner) {
 		auto& buffer = m_slot_buffers[*owner];
@@ -550,18 +576,18 @@ std::pair<Buffer*, uint64_t> BufferCache::ObtainBufferForImage(uint64_t vaddr, u
 }
 
 void BufferCache::FillBuffer(uint64_t vaddr, uint64_t size, uint32_t value, bool is_gds) {
-	if ((vaddr & 3u) != 0 || size == 0 || (size & 3u) != 0 || size > UINT64_MAX - vaddr) {
-		EXIT("BufferCache: fill range must be dword aligned\n");
-	}
 	if (is_gds) {
-		if (vaddr > m_gds_buffer.Size() || size > m_gds_buffer.Size() - vaddr) {
-			EXIT("BufferCache: GDS fill range is out of bounds\n");
+		if ((vaddr & 3u) != 0 || size == 0 || (size & 3u) != 0 ||
+		    vaddr > m_gds_buffer.Size() || size > m_gds_buffer.Size() - vaddr) {
+			WarnInvalidBufferRequest("GDS fill", vaddr, size, value);
+			return;
 		}
 		m_gds_buffer.Fill(vaddr, size, value);
 		return;
 	}
-	if (vaddr == 0) {
-		EXIT("BufferCache: invalid fill memory address\n");
+	if ((vaddr & 3u) != 0 || (size & 3u) != 0 || !GuestRange {vaddr, size}.Valid()) {
+		WarnInvalidBufferRequest("fill", vaddr, size, value);
+		return;
 	}
 	(void)m_texture_cache.ClearMeta(vaddr);
 	if (!IsRegionGpuModified(vaddr, size)) {
@@ -580,14 +606,19 @@ void BufferCache::CopyBuffer(uint64_t dst_vaddr, uint64_t src_vaddr, uint64_t si
                              bool src_gds) {
 	const bool dst_memory = !dst_gds;
 	const bool src_memory = !src_gds;
-	if ((dst_memory && dst_vaddr == 0) || (src_memory && src_vaddr == 0) || size == 0 ||
+	if (size == 0 || (dst_memory && !GuestRange {dst_vaddr, size}.Valid()) ||
+	    (src_memory && !GuestRange {src_vaddr, size}.Valid()) ||
 	    ((dst_gds || src_gds) && ((dst_vaddr | src_vaddr | size) & 3u) != 0) ||
 	    size > UINT64_MAX - dst_vaddr || size > UINT64_MAX - src_vaddr || (dst_gds && src_gds) ||
 	    (dst_gds && (dst_vaddr > m_gds_buffer.Size() || size > m_gds_buffer.Size() - dst_vaddr)) ||
 	    (src_gds && (src_vaddr > m_gds_buffer.Size() || size > m_gds_buffer.Size() - src_vaddr))) {
-		EXIT("BufferCache: invalid copy range, src=0x%016" PRIx64 " dst=0x%016" PRIx64
-		     " size=0x%016" PRIx64 " src_gds=%d dst_gds=%d\n",
-		     src_vaddr, dst_vaddr, size, static_cast<int>(src_gds), static_cast<int>(dst_gds));
+		WarnInvalidBufferRequest("copy destination", dst_vaddr, size,
+		                         static_cast<uint32_t>(dst_gds) |
+		                             (static_cast<uint32_t>(src_gds) << 1u));
+		WarnInvalidBufferRequest("copy source", src_vaddr, size,
+		                         static_cast<uint32_t>(dst_gds) |
+		                             (static_cast<uint32_t>(src_gds) << 1u));
+		return;
 	}
 	// A copy into whole levels of a GPU-written image lands on its GPU contents, not stale guest
 	// bytes, while no buffer holds the range.
@@ -617,7 +648,8 @@ void BufferCache::CopyBuffer(uint64_t dst_vaddr, uint64_t src_vaddr, uint64_t si
 
 bool BufferCache::IsRegionRegistered(uint64_t vaddr, uint64_t size) {
 	if (!GuestRange {vaddr, size}.Valid()) {
-		EXIT("BufferCache: invalid registered-region query\n");
+		WarnInvalidBufferRequest("registered-region query", vaddr, size);
+		return false;
 	}
 	// Cached buffers are ordered and non-overlapping. The last buffer beginning before the query
 	// end is therefore the only possible intersection.
@@ -630,6 +662,10 @@ bool BufferCache::IsRegionRegistered(uint64_t vaddr, uint64_t size) {
 }
 
 void BufferCache::MarkColorMetadataChecked(uint64_t vaddr, uint64_t size, uint32_t keys) {
+	if (!GuestRange {vaddr, size}.Valid()) {
+		WarnInvalidBufferRequest("color metadata tracking", vaddr, size, keys);
+		return;
+	}
 	for (uint32_t slot = 0; slot < m_checked_color_metadata.size(); slot++) {
 		if ((keys & (1u << slot)) != 0) {
 			m_checked_color_metadata[slot].Add(vaddr, size);
@@ -638,6 +674,9 @@ void BufferCache::MarkColorMetadataChecked(uint64_t vaddr, uint64_t size, uint32
 }
 
 bool BufferCache::IsColorMetadataChecked(uint64_t vaddr, uint64_t size, uint32_t keys) const {
+	if (!GuestRange {vaddr, size}.Valid()) {
+		return false;
+	}
 	for (uint32_t slot = 0; slot < m_checked_color_metadata.size(); slot++) {
 		if ((keys & (1u << slot)) != 0 && !m_checked_color_metadata[slot].Contains(vaddr, size)) {
 			return false;
@@ -647,24 +686,39 @@ bool BufferCache::IsColorMetadataChecked(uint64_t vaddr, uint64_t size, uint32_t
 }
 
 void BufferCache::ForgetColorMetadataChecks(uint64_t vaddr, uint64_t size) {
+	if (!GuestRange {vaddr, size}.Valid()) {
+		return;
+	}
 	for (auto& checked: m_checked_color_metadata) {
 		checked.Subtract(vaddr, size);
 	}
 }
 
 bool BufferCache::IsRegionGpuModified(uint64_t vaddr, uint64_t size) {
+	if (!GuestRange {vaddr, size}.Valid()) {
+		return false;
+	}
 	return m_memory_tracker.IsRegionGpuModified(vaddr, size);
 }
 
 bool BufferCache::HasGpuDirtyBytes(uint64_t vaddr, uint64_t size) {
+	if (!GuestRange {vaddr, size}.Valid()) {
+		return false;
+	}
 	return m_gpu_modified_ranges.Intersects(vaddr, size);
 }
 
 bool BufferCache::HasOnlyGpuDirtyBytes(uint64_t vaddr, uint64_t size) {
+	if (!GuestRange {vaddr, size}.Valid()) {
+		return false;
+	}
 	return m_gpu_modified_ranges.Contains(vaddr, size);
 }
 
 bool BufferCache::IsRegionCpuModified(uint64_t vaddr, uint64_t size) {
+	if (!GuestRange {vaddr, size}.Valid()) {
+		return false;
+	}
 	return m_memory_tracker.IsRegionCpuModified(vaddr, size);
 }
 
@@ -723,6 +777,10 @@ void BufferCache::ProcessFaultBuffer() {
 }
 
 void BufferCache::QueueBdaSync(uint64_t vaddr, uint64_t size) {
+	if (!GuestRange {vaddr, size}.Valid()) {
+		WarnInvalidBufferRequest("BDA synchronization", vaddr, size);
+		return;
+	}
 	const auto begin = Common::AlignDown(vaddr, TRACKER_PAGE_SIZE);
 	const auto end   = Common::AlignUp(vaddr + size, TRACKER_PAGE_SIZE);
 	std::lock_guard lock(m_bda_sync_mutex);

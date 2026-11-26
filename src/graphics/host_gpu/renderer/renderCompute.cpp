@@ -508,8 +508,17 @@ void RenderExecutor::DispatchDirect(CommandBuffer& buffer, uint32_t thread_group
 
 void RenderExecutor::DispatchIndirect(CommandBuffer& buffer, uint64_t args_addr, uint32_t mode,
                                       bool async_compute) {
-	EXIT_IF(args_addr == 0 || (args_addr & 3u) != 0 ||
-	        (mode & Pm4::COMPUTE_DISPATCH_INITIATOR_USE_THREAD_DIMENSIONS) != 0);
+	if (args_addr == 0 || (args_addr & 3u) != 0 ||
+	    !GuestRange {args_addr, sizeof(vk::DispatchIndirectCommand)}.Valid()) {
+		static std::atomic<uint32_t> warning_count {0};
+		if (warning_count.fetch_add(1, std::memory_order_relaxed) < 16) {
+			LOGF("Warning: ignoring invalid indirect dispatch buffer: address=0x%016" PRIx64
+			     " size=0x%016" PRIx64 "\n",
+			     args_addr, sizeof(vk::DispatchIndirectCommand));
+		}
+		return;
+	}
+	EXIT_IF((mode & Pm4::COMPUTE_DISPATCH_INITIATOR_USE_THREAD_DIMENSIONS) != 0);
 	m_context.GetCommandScheduler().PopPendingOperations();
 	Common::LockGuard lock(m_context.GetMutex());
 	vk::DispatchIndirectCommand args {};

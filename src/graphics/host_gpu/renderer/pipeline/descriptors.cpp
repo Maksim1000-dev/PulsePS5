@@ -116,10 +116,29 @@ NativeStorageBuffer(RenderContext& context, const PreparedBindings::BufferSource
 		// Null descriptors read zero and drop writes, with or without shader bounds checks.
 		return {nullptr, 0, vk::WholeSize};
 	}
+	if (!GuestRange {address, size}.Valid()) {
+		static std::atomic<uint32_t> warning_count {0};
+		if (warning_count.fetch_add(1, std::memory_order_relaxed) < 16) {
+			const auto parameters = static_cast<uint32_t>(resource.read) |
+			                        (static_cast<uint32_t>(resource.written) << 1u) |
+			                        (static_cast<uint32_t>(resource.formatted) << 2u);
+			LOGF("Warning: ignoring invalid storage buffer descriptor: address=0x%016" PRIx64
+			     " size=0x%016" PRIx64 " parameters=0x%08x\n",
+			     address, size, parameters);
+		}
+		// Native null descriptors read as zero and discard writes.
+		return {nullptr, 0, vk::WholeSize};
+	}
 	const auto& graphics  = context.GetGraphics();
 	const auto  alignment = graphics.StorageMinAlignment();
 	if (size > graphics.GetPhysicalDeviceProperties().limits.maxStorageBufferRange) {
-		EXIT("storage buffer range is unsupported\n");
+		static std::atomic<uint32_t> warning_count {0};
+		if (warning_count.fetch_add(1, std::memory_order_relaxed) < 16) {
+			LOGF("Warning: ignoring oversized storage buffer descriptor: address=0x%016" PRIx64
+			     " size=0x%016" PRIx64 "\n",
+			     address, size);
+		}
+		return {nullptr, 0, vk::WholeSize};
 	}
 	auto [buffer, offset] = context.GetBufferCache().ObtainBuffer(
 	    address, size, resource.written,
@@ -127,8 +146,14 @@ NativeStorageBuffer(RenderContext& context, const PreparedBindings::BufferSource
 	const auto aligned_offset = Common::AlignDown(offset, alignment);
 	const auto adjustment     = offset - aligned_offset;
 	const auto max_range      = graphics.GetPhysicalDeviceProperties().limits.maxStorageBufferRange;
-	if (adjustment >= 256 || size > max_range - adjustment) {
-		EXIT("storage buffer offset adjustment is unsupported\n");
+	if (adjustment >= 256 || adjustment > max_range || size > max_range - adjustment) {
+		static std::atomic<uint32_t> warning_count {0};
+		if (warning_count.fetch_add(1, std::memory_order_relaxed) < 16) {
+			LOGF("Warning: ignoring unsupported storage buffer descriptor: address=0x%016" PRIx64
+			     " size=0x%016" PRIx64 " offset=0x%016" PRIx64 "\n",
+			     address, size, offset);
+		}
+		return {nullptr, 0, vk::WholeSize};
 	}
 	buffer_offset = static_cast<uint32_t>(adjustment);
 	const vk::DescriptorBufferInfo result {buffer->Handle(), aligned_offset, size + adjustment};

@@ -5534,6 +5534,15 @@ public:
               invalid_buffer_id == Libs::Graphics::NULL_BUFFER_ID &&
                   cache.GetBuffer(invalid_buffer_id).Size() == 16,
               "invalid guest range did not resolve to the null dummy buffer");
+      const auto [invalid_buffer, invalid_buffer_offset] =
+          cache.ObtainBuffer(Libs::Graphics::LOWER_ADDRESS_SIZE - 1, 2, false);
+      Require(name, "invalid buffer acquisition fallback",
+              invalid_buffer == &cache.GetBuffer(Libs::Graphics::NULL_BUFFER_ID) &&
+                  invalid_buffer_offset == 0 &&
+                  !cache.IsRegionRegistered(Libs::Graphics::LOWER_ADDRESS_SIZE - 1, 2),
+              "invalid guest range did not resolve to an empty dummy-backed result");
+      cache.FillBuffer(Libs::Graphics::LOWER_ADDRESS_SIZE - 4, 8, 0, false);
+      cache.CopyBuffer(index_begin, Libs::Graphics::LOWER_ADDRESS_SIZE - 1, 2, false, false);
       Require(name, "registered-range empty lookup",
               !cache.IsRegionRegistered(index_begin, index_span) &&
                   !BufferCacheTestAccess::PageOwner(cache, index_begin),
