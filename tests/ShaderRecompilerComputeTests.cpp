@@ -36,6 +36,7 @@
 #include "graphics/host_gpu/renderer/image/tiler.h"
 #include "graphics/host_gpu/renderer/pipeline/descriptors.h"
 #include "graphics/host_gpu/renderer/pipeline/pipelineCache.h"
+#include "graphics/host_gpu/renderer/pipeline/shaderQuarantine.h"
 #include "graphics/host_gpu/renderer/rayTracing.h"
 #include "graphics/host_gpu/renderer/debug.h"
 #include "graphics/host_gpu/renderer/render.h"
@@ -94,6 +95,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <initializer_list>
 #include <limits>
 #include <map>
@@ -2733,6 +2735,19 @@ public:
             "restarting command recording lost the current guest context");
     scheduler.Begin(registers, user_config, shaders);
 
+    const auto batch_tick = scheduler.CurrentTick();
+    for (uint32_t i = 0; i < CommandScheduler::DrawDispatchBatchLimit - 1; ++i) {
+      scheduler.RecordGpuWork({});
+    }
+    Require("SchedulerTimeline", "batch below limit",
+            scheduler.CurrentTick() == batch_tick,
+            "scheduler submitted before the draw/dispatch batch reached its limit");
+    scheduler.RecordGpuWork({});
+    Require("SchedulerTimeline", "batch limit submit",
+            scheduler.CurrentTick() == batch_tick + 1,
+            "scheduler did not submit and restart the command buffer at the batch limit");
+    scheduler.Wait(batch_tick);
+
     const auto first_tick = scheduler.CurrentTick();
     uint32_t completed = 0;
     scheduler.DeferOperation([owned = std::make_unique<uint32_t>(1),
@@ -2897,6 +2912,39 @@ public:
     Require("SchedulerTimeline", "shutdown drain",
             reentrant == 2 && concurrent_completed.load(),
             "shutdown lost reentrant or concurrent deferred work");
+
+    const auto quarantine_dir =
+        std::filesystem::temp_directory_path() /
+        ("kyty_shader_quarantine_" +
+         std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    const auto quarantine_path = quarantine_dir / "shader_quarantine.txt";
+    constexpr std::array<uint64_t, 3> quarantine_hashes {
+        0x1234u, 0xabcdef0123456789ull, 0x1234u};
+    {
+      ShaderQuarantine quarantine(quarantine_path);
+      Require("ShaderQuarantine", "initial state",
+              !quarantine.Contains(quarantine_hashes[0]),
+              "new quarantine unexpectedly contained a shader hash");
+      quarantine.Add(quarantine_hashes);
+      Require("ShaderQuarantine", "added state",
+              quarantine.Contains(quarantine_hashes[0]) &&
+                  quarantine.Contains(quarantine_hashes[1]),
+              "quarantine did not retain newly added shader hashes");
+      constexpr std::array<uint64_t, 1> additional_hash {0x5678u};
+      quarantine.Add(additional_hash);
+    }
+    {
+      ShaderQuarantine quarantine(quarantine_path);
+      Require("ShaderQuarantine", "persistent state",
+              quarantine.Contains(quarantine_hashes[0]) &&
+                  quarantine.Contains(quarantine_hashes[1]) &&
+                  quarantine.Contains(0x5678u) && !quarantine.Contains(0x9abcu),
+              "quarantine did not reload only persisted shader hashes");
+    }
+    std::error_code quarantine_cleanup_error;
+    std::filesystem::remove_all(quarantine_dir, quarantine_cleanup_error);
+    Require("ShaderQuarantine", "temporary cleanup", !quarantine_cleanup_error,
+            "failed to remove the temporary shader quarantine directory");
     std::printf("[host]    %-32s ok\n", "SchedulerTimeline");
   }
 

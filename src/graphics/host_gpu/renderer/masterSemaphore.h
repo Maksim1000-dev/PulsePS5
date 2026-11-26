@@ -28,6 +28,8 @@ public:
 	}
 	[[nodiscard]] vk::Semaphore Handle() const noexcept { return m_semaphore; }
 
+	[[nodiscard]] vk::Result RefreshResult();
+	[[nodiscard]] vk::Result WaitResult(uint64_t tick);
 	void Refresh();
 	void Wait(uint64_t tick);
 

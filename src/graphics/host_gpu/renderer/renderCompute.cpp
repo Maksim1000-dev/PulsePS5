@@ -347,6 +347,16 @@ void RenderExecutor::DispatchDirect(CommandBuffer& buffer, uint32_t thread_group
 	}
 	m_context.GetImageHeap().BeginDraw();
 	if (!m_context.GetPipelineCache().GetComputeProgram(cs_regs, input_info)) return;
+	if (input_info.stage.module != nullptr &&
+	    m_context.GetPipelineCache().IsShaderQuarantined(input_info.stage.module->info.shader_hash)) {
+		static std::atomic<uint32_t> log_count {0};
+		if (log_count.fetch_add(1, std::memory_order_relaxed) < 16) {
+			LOGF("Skipping dispatch with quarantined shader hash=0x%016" PRIx64 "\n",
+			     input_info.stage.module->info.shader_hash);
+		}
+		ResetBindings();
+		return;
+	}
 	if (use_thread_dimensions) {
 		input_info.dispatch_threads_num[0]    = thread_group_x;
 		input_info.dispatch_threads_num[1]    = thread_group_y;
@@ -466,6 +476,7 @@ void RenderExecutor::DispatchDirect(CommandBuffer& buffer, uint32_t thread_group
 	const uint64_t     group_threads = uint64_t {std::max(input_info.threads_num[0], 1u)} *
 	                                   std::max(input_info.threads_num[1], 1u) *
 	                                   std::max(input_info.threads_num[2], 1u);
+	uint64_t dispatch_command_count = 0;
 	if ((mode & DISPATCH_INITIATOR_ORDERED_APPEND_ENABLE) != 0 && program.info.uses_gds &&
 	    group_threads <= input_info.wave_size && !input_info.lds_storage) {
 		// A single guest wave per group can run in launch order without a device-wide
@@ -477,16 +488,21 @@ void RenderExecutor::DispatchDirect(CommandBuffer& buffer, uint32_t thread_group
 						ShaderAccessBarrier(vk_buffer, vk::PipelineStageFlagBits::eComputeShader);
 					}
 					vk_buffer.dispatchBase(x, y, z, 1, 1, 1);
+					dispatch_command_count++;
 				}
 			}
 		}
 	} else {
 		vk_buffer.dispatch(thread_group_x, thread_group_y, thread_group_z);
+		dispatch_command_count = 1;
 	}
 	Common::DebugCounters::Add(Common::DebugCounters::Counter::Dispatches);
 
 	// The removed host fence also ordered read-only dispatches before later writers.
 	ShaderAccessBarrier(vk_buffer, vk::PipelineStageFlagBits::eComputeShader);
+	const auto shader_hash = program.shader_hash;
+	m_context.GetCommandScheduler().RecordGpuWork(
+	    std::span<const uint64_t>(&shader_hash, 1), dispatch_command_count);
 	ResetBindings();
 }
 
@@ -511,6 +527,16 @@ void RenderExecutor::DispatchIndirect(CommandBuffer& buffer, uint64_t args_addr,
 	input_info.indirect_args_address = args_addr;
 	m_context.GetImageHeap().BeginDraw();
 	if (!m_context.GetPipelineCache().GetComputeProgram(cs_regs, input_info)) return;
+	if (input_info.stage.module != nullptr &&
+	    m_context.GetPipelineCache().IsShaderQuarantined(input_info.stage.module->info.shader_hash)) {
+		static std::atomic<uint32_t> log_count {0};
+		if (log_count.fetch_add(1, std::memory_order_relaxed) < 16) {
+			LOGF("Skipping dispatch with quarantined shader hash=0x%016" PRIx64 "\n",
+			     input_info.stage.module->info.shader_hash);
+		}
+		ResetBindings();
+		return;
+	}
 	buffer.EndRendering();
 	auto& pipeline = m_context.GetPipelineCache().GetComputePipeline(input_info);
 	auto& bindings = m_compute_bindings;
@@ -543,6 +569,8 @@ void RenderExecutor::DispatchIndirect(CommandBuffer& buffer, uint64_t args_addr,
 	vk_buffer.dispatchIndirect(args_buffer->Handle(), args_offset);
 	Common::DebugCounters::Add(Common::DebugCounters::Counter::Dispatches);
 	ShaderAccessBarrier(vk_buffer, vk::PipelineStageFlagBits::eComputeShader);
+	const auto shader_hash = program.shader_hash;
+	m_context.GetCommandScheduler().RecordGpuWork(std::span<const uint64_t>(&shader_hash, 1));
 	ResetBindings();
 }
 

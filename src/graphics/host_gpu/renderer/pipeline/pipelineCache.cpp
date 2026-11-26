@@ -189,6 +189,14 @@ std::filesystem::path ShaderStorePath() {
 	return std::filesystem::path("_PipelineCache") / (title_id + ".shaders");
 }
 
+static std::filesystem::path ShaderQuarantinePath() {
+	const auto title_id = PipelineCacheTitleId();
+	if (title_id.empty()) {
+		return {};
+	}
+	return std::filesystem::path("_PipelineCache") / title_id / "shader_quarantine.txt";
+}
+
 bool GraphicsPipelineKey::operator==(const GraphicsPipelineKey& other) const {
 	return std::memcmp(this, &other, sizeof(*this)) == 0;
 }
@@ -405,7 +413,8 @@ PipelineCache::PipelineCache(GraphicContext&                         graphics,
                              ShaderRecompiler::IR::ImageHeapSource* image_heap,
                              const std::filesystem::path&           shader_store)
     : m_graphics(graphics), m_image_heap(image_heap),
-      m_next_driver_cache_save(std::chrono::steady_clock::now() + DriverCacheSaveInterval) {
+      m_next_driver_cache_save(std::chrono::steady_clock::now() + DriverCacheSaveInterval),
+      m_shader_quarantine(ShaderQuarantinePath()) {
 	EXIT_NOT_IMPLEMENTED(!Common::Thread::IsMainThread());
 	InitializeDriverCache();
 	WarmUp(shader_store);

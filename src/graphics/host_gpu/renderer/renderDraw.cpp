@@ -834,6 +834,27 @@ bool RenderExecutor::PrepareDrawRenderState(CommandBuffer& buffer, const DrawCal
 	if (state.vertex_info[0].stage.module == nullptr) {
 		return false;
 	}
+	const auto& pipeline_cache = m_context.GetPipelineCache();
+	for (const auto& stage: state.VertexStages()) {
+		if (stage.stage.module != nullptr &&
+		    pipeline_cache.IsShaderQuarantined(stage.stage.module->info.shader_hash)) {
+			static std::atomic<uint32_t> log_count {0};
+			if (log_count.fetch_add(1, std::memory_order_relaxed) < 16) {
+				LOGF("Skipping draw with quarantined shader hash=0x%016" PRIx64 "\n",
+				     stage.stage.module->info.shader_hash);
+			}
+			return false;
+		}
+	}
+	if (state.ps_active && state.ps_input_info.stage.module != nullptr &&
+	    pipeline_cache.IsShaderQuarantined(state.ps_input_info.stage.module->info.shader_hash)) {
+		static std::atomic<uint32_t> log_count {0};
+		if (log_count.fetch_add(1, std::memory_order_relaxed) < 16) {
+			LOGF("Skipping draw with quarantined shader hash=0x%016" PRIx64 "\n",
+			     state.ps_input_info.stage.module->info.shader_hash);
+		}
+		return false;
+	}
 	// An empty screen scissor rasterizes nothing in any viewport, so only vertex-stage buffer
 	// writes would remain (PPSA02110 ends mip reductions with a 0x0 pass past the last level).
 	const auto& vp = buffer.GetRegisters().GetScreenViewport();
@@ -945,8 +966,9 @@ static void LogDrawStateIfNeeded(const CommandBuffer& buffer, const DrawCallInfo
 	                  index_addr);
 }
 
-static void EmitDrawPrimitives(const HW::UserConfig& ucfg, vk::CommandBuffer vk_buffer,
-                               const DrawCallInfo& draw, const DrawEmitInfo& emit) {
+static uint32_t EmitDrawPrimitives(const HW::UserConfig& ucfg, vk::CommandBuffer vk_buffer,
+                                   const DrawCallInfo& draw, const DrawEmitInfo& emit) {
+	uint32_t command_count = 0;
 	switch (ucfg.GetPrimType()) {
 		case Prospero::PrimitiveType::kPointList:
 		case Prospero::PrimitiveType::kLineList:
@@ -965,6 +987,7 @@ static void EmitDrawPrimitives(const HW::UserConfig& ucfg, vk::CommandBuffer vk_
 				vk_buffer.draw(draw.index_count, draw.instance_count,
 				               static_cast<uint32_t>(emit.vertex_offset), emit.first_instance);
 			}
+			command_count = 1;
 			break;
 		case Prospero::PrimitiveType::kQuadListLegacy:
 			EXIT_NOT_IMPLEMENTED((draw.index_count & 0x3u) != 0);
@@ -977,10 +1000,12 @@ static void EmitDrawPrimitives(const HW::UserConfig& ucfg, vk::CommandBuffer vk_
 					               i + static_cast<uint32_t>(emit.vertex_offset),
 					               emit.first_instance);
 				}
+				command_count++;
 			}
 			break;
 		default: EXIT("unknown primitive type: %u\n", static_cast<uint32_t>(ucfg.GetPrimType()));
 	}
+	return command_count;
 }
 
 bool RenderExecutor::CopyDepthToColor(CommandBuffer& buffer, const DrawCallInfo& draw,
@@ -1208,18 +1233,23 @@ void RenderExecutor::ExecutePreparedDraw(CommandBuffer& buffer, const DrawCallIn
 	vk_buffer.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline.pipeline);
 	auto&         occlusion_queries = m_context.GetOcclusionQueries();
 	const int32_t occlusion_query   = occlusion_queries.Begin(vk_buffer);
+	uint32_t      draw_command_count = 0;
 	if (mesh_task) {
 		vk_buffer.drawMeshTasksEXT(emit.indirect.count, 1, 1);
+		draw_command_count = 1;
 	} else if (mesh_active) {
 		vk_buffer.drawMeshTasksEXT(mesh_groups, draw.instance_count, 1);
+		draw_command_count = 1;
 	} else if (args_buffer.first == nullptr) {
-		EmitDrawPrimitives(ucfg, vk_buffer, draw, emit);
+		draw_command_count = EmitDrawPrimitives(ucfg, vk_buffer, draw, emit);
 	} else if (draw.indexed) {
 		vk_buffer.drawIndexedIndirect(args_buffer.first->Handle(), args_buffer.second,
 		                              emit.indirect.count, emit.indirect.stride);
+		draw_command_count = 1;
 	} else {
 		vk_buffer.drawIndirect(args_buffer.first->Handle(), args_buffer.second,
 		                       emit.indirect.count, emit.indirect.stride);
+		draw_command_count = 1;
 	}
 	occlusion_queries.End(vk_buffer, occlusion_query);
 	Common::DebugCounters::Add(Common::DebugCounters::Counter::Draws);
@@ -1228,6 +1258,20 @@ void RenderExecutor::ExecutePreparedDraw(CommandBuffer& buffer, const DrawCallIn
 	if (shader_write_stages) {
 		buffer.EndRendering();
 		ShaderWriteBarrier(vk_buffer, shader_write_stages);
+	}
+	if (draw_command_count != 0) {
+		std::array<uint64_t, 4> shader_hashes {};
+		uint32_t                shader_count = 0;
+		for (const auto& stage: vertex_stages) {
+			if (stage.stage.module != nullptr) {
+				shader_hashes[shader_count++] = stage.stage.module->info.shader_hash;
+			}
+		}
+		if (state.ps_active && state.ps_input_info.stage.module != nullptr) {
+			shader_hashes[shader_count++] = state.ps_input_info.stage.module->info.shader_hash;
+		}
+		m_context.GetCommandScheduler().RecordGpuWork(
+		    std::span<const uint64_t>(shader_hashes.data(), shader_count), draw_command_count);
 	}
 }
 

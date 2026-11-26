@@ -3,8 +3,11 @@
 #include "common/assert.h"
 #include "common/debugCounters.h"
 #include "graphics/host_gpu/graphicContext.h"
+#include "graphics/host_gpu/renderer/pipeline/pipelineCache.h"
+#include "graphics/host_gpu/renderer/renderContext.h"
 
 #include <algorithm>
+#include <chrono>
 #include <optional>
 
 namespace Libs::Graphics {
@@ -106,7 +109,8 @@ void CommandScheduler::Shutdown() {
 	if (!m_command.IsInvalid()) {
 		Submit();
 	}
-	m_master.Wait(CurrentTick() - 1);
+	WaitForGpu(CurrentTick() - 1);
+	PollSubmittedBatches(false);
 	PopPendingOperations();
 	DrainPriorityOperations();
 	m_priority_thread.request_stop();
@@ -146,12 +150,41 @@ void CommandScheduler::Flush(SubmitInfo& submit) {
 	BeginNext();
 }
 
+void CommandScheduler::RecordGpuWork(std::span<const uint64_t> shader_hashes,
+                                     uint64_t                   command_count) {
+	CheckActive();
+	EXIT_IF(command_count == 0);
+
+	bool should_flush = false;
+	{
+		std::lock_guard lock(m_batch_mutex);
+		for (const auto hash: shader_hashes) {
+			if (hash != 0 &&
+			    std::ranges::find(m_batch_shader_hashes, hash) == m_batch_shader_hashes.end()) {
+				m_batch_shader_hashes.push_back(hash);
+			}
+		}
+
+		const auto remaining = DrawDispatchBatchLimit - m_batch_command_count;
+		if (command_count >= remaining) {
+			m_batch_command_count = DrawDispatchBatchLimit;
+			should_flush         = true;
+		} else {
+			m_batch_command_count += static_cast<uint32_t>(command_count);
+		}
+	}
+	if (should_flush) {
+		Flush();
+	}
+}
+
 void CommandScheduler::Finish() {
 	CheckActive();
 	if (!m_command.IsInvalid()) {
 		Submit();
 	}
-	m_master.Wait(CurrentTick() - 1);
+	WaitForGpu(CurrentTick() - 1);
+	PollSubmittedBatches(false);
 	BeginNext();
 	PopPendingOperations();
 }
@@ -165,10 +198,10 @@ void CommandScheduler::Wait(uint64_t tick) {
 		// resources are released only at the next GPU operation boundary.
 		const auto submitted_tick = Submit();
 		EXIT_IF(submitted_tick != tick);
-		m_master.Wait(tick);
+		WaitForGpu(tick);
 		BeginNext();
 	} else {
-		m_master.Wait(tick);
+		WaitForGpu(tick);
 	}
 }
 
@@ -237,7 +270,7 @@ void CommandScheduler::PriorityOperationsThread(std::stop_token stop) {
 			m_priority_operations.pop();
 			m_priority_active_tick = operation.tick;
 		}
-		m_master.Wait(operation.tick);
+		WaitForGpu(operation.tick);
 		if (!stop.stop_requested()) {
 			RunOperation(std::move(operation.callback));
 		}
@@ -277,9 +310,10 @@ void CommandScheduler::RunOperation(Common::UniqueFunction<void>&& operation) {
 
 bool CommandScheduler::IsFree(uint64_t tick) {
 	if (m_master.IsFree(tick)) {
+		PollSubmittedBatches(false);
 		return true;
 	}
-	m_master.Refresh();
+	PollSubmittedBatches(true);
 	return m_master.IsFree(tick);
 }
 
@@ -294,6 +328,7 @@ CommandBuffer& CommandScheduler::Current() {
 
 CommandBuffer& CommandScheduler::BeginCommand() {
 	EXIT_IF(!m_command.IsInvalid());
+	PollSubmittedBatches(true);
 	m_command.m_buffer = m_command_pool.Commit();
 	m_command.Begin();
 	m_dynamic_state.Invalidate();
@@ -304,12 +339,14 @@ uint64_t CommandScheduler::Submit(SubmitInfo submit) {
 	EXIT_IF(m_command.IsInvalid());
 
 	m_command.End();
+	PollSubmittedBatches(true);
 	const auto buffer   = m_command.m_buffer;
 	auto&      graphics = m_graphics;
 	EXIT_IF(graphics.queue == nullptr);
 
 	vk::Result result;
 	uint64_t   tick;
+	const auto submitted_at = std::chrono::steady_clock::now();
 	{
 		Common::LockGuard lock(graphics.queue_mutex);
 		tick = m_master.NextTick();
@@ -336,11 +373,81 @@ uint64_t CommandScheduler::Submit(SubmitInfo submit) {
 	Common::DebugCounters::Add(Common::DebugCounters::Counter::QueueSubmits);
 
 	if (result != vk::Result::eSuccess) {
+		if (result == vk::Result::eErrorDeviceLost) {
+			QuarantineDeviceLostBatches();
+		}
 		EXIT("vkQueueSubmit failed: %s, tick=%" PRIu64 "\n", vk::to_string(result).c_str(), tick);
 	}
 
+	{
+		std::lock_guard lock(m_batch_mutex);
+		if (!m_batch_shader_hashes.empty()) {
+			m_submitted_batches.push_back(
+			    {tick, submitted_at, std::move(m_batch_shader_hashes)});
+			m_batch_shader_hashes.clear();
+		}
+		m_batch_command_count = 0;
+	}
 	m_command.m_buffer = nullptr;
+	PollSubmittedBatches(false);
 	return tick;
+}
+
+void CommandScheduler::PollSubmittedBatches(bool refresh) {
+	{
+		std::lock_guard lock(m_batch_mutex);
+		if (m_submitted_batches.empty()) {
+			return;
+		}
+	}
+	if (refresh) {
+		const auto result = m_master.RefreshResult();
+		if (result == vk::Result::eErrorDeviceLost) {
+			QuarantineDeviceLostBatches();
+			EXIT("Vulkan device lost while checking GPU batch completion\n");
+		}
+		EXIT_NOT_IMPLEMENTED(result != vk::Result::eSuccess);
+	}
+
+	const auto completed_tick = m_master.KnownGpuTick();
+	const auto completed_at   = std::chrono::steady_clock::now();
+	std::vector<uint64_t> slow_shader_hashes;
+	{
+		std::lock_guard lock(m_batch_mutex);
+		while (!m_submitted_batches.empty() &&
+		       m_submitted_batches.front().tick <= completed_tick) {
+			auto batch = std::move(m_submitted_batches.front());
+			m_submitted_batches.pop_front();
+			if (completed_at - batch.submitted_at > std::chrono::milliseconds {800}) {
+				slow_shader_hashes.insert(slow_shader_hashes.end(), batch.shader_hashes.begin(),
+				                          batch.shader_hashes.end());
+			}
+		}
+	}
+	m_context.GetPipelineCache().QuarantineShaderHashes(slow_shader_hashes);
+}
+
+void CommandScheduler::QuarantineDeviceLostBatches() {
+	std::vector<uint64_t> shader_hashes;
+	{
+		std::lock_guard lock(m_batch_mutex);
+		shader_hashes = m_batch_shader_hashes;
+		for (const auto& batch: m_submitted_batches) {
+			shader_hashes.insert(shader_hashes.end(), batch.shader_hashes.begin(),
+			                     batch.shader_hashes.end());
+		}
+	}
+	m_context.GetPipelineCache().QuarantineShaderHashes(shader_hashes);
+}
+
+void CommandScheduler::WaitForGpu(uint64_t tick) {
+	const auto result = m_master.WaitResult(tick);
+	if (result == vk::Result::eErrorDeviceLost) {
+		QuarantineDeviceLostBatches();
+		EXIT("Vulkan device lost while waiting for GPU tick=%" PRIu64 "\n", tick);
+	}
+	EXIT_NOT_IMPLEMENTED(result != vk::Result::eSuccess);
+	PollSubmittedBatches(false);
 }
 
 void CommandScheduler::BeginNext() {

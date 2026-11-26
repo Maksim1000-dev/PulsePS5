@@ -8,6 +8,7 @@
 #include "common/uniqueFunction.h"
 #include "graphics/host_gpu/renderer/colorRenderTarget.h"
 #include "graphics/host_gpu/renderer/depthRenderTarget.h"
+#include "graphics/host_gpu/renderer/pipeline/shaderQuarantine.h"
 #include "graphics/host_gpu/renderer/renderTarget.h"
 #include "graphics/host_gpu/vulkanCommon.h"
 #include "graphics/shader/recompiler/ir/passes/ResourceMaterialization.h"
@@ -207,6 +208,12 @@ public:
 	Pipeline& GetGraphicsPipeline(const CommandBuffer& command, const DrawRenderState& state,
 	                              const DrawTargets& targets);
 	Pipeline& GetComputePipeline(const ShaderComputeInputInfo& input_info);
+	[[nodiscard]] bool IsShaderQuarantined(uint64_t shader_hash) const {
+		return m_shader_quarantine.Contains(shader_hash);
+	}
+	void QuarantineShaderHashes(std::span<const uint64_t> shader_hashes) {
+		m_shader_quarantine.Add(shader_hashes);
+	}
 
 private:
 	friend struct PipelineCacheTestAccess;
@@ -259,6 +266,7 @@ private:
 	std::unordered_map<GraphicsPipelineKey, Pipeline, GraphicsPipelineKeyHash> m_graphics_pipelines;
 	std::unordered_map<uint64_t, Pipeline>                                     m_compute_pipelines;
 	std::unordered_map<uint64_t, ShaderTessellationInputInfo>                  m_tess_layouts;
+	ShaderQuarantine                                                           m_shader_quarantine;
 	// Records everything first created if a shader store is open, and writes the driver cache.
 	ShaderStoreWriter m_store;
 

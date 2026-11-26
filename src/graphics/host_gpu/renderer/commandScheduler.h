@@ -7,7 +7,9 @@
 #include "graphics/host_gpu/renderer/masterSemaphore.h"
 #include "graphics/host_gpu/renderer/render.h"
 
+#include <chrono>
 #include <condition_variable>
+#include <deque>
 #include <mutex>
 #include <queue>
 #include <thread>
@@ -21,10 +23,13 @@ public:
 	~CommandScheduler();
 	KYTY_CLASS_NO_COPY(CommandScheduler);
 
+	static constexpr uint32_t DrawDispatchBatchLimit = 64;
+
 	void           Begin(HW::Context& registers, HW::UserConfig& user_config, HW::Shader& shaders);
 	void           EndRendering() { m_command.EndRendering(); }
 	void           Flush();
 	void           Flush(SubmitInfo& submit);
+	void           RecordGpuWork(std::span<const uint64_t> shader_hashes, uint64_t command_count = 1);
 	void           Finish();
 	CommandBuffer& BeginCommand();
 	uint64_t       Submit(SubmitInfo submit = {});
@@ -80,7 +85,16 @@ private:
 		uint64_t                     tick = 0;
 	};
 
+	struct SubmittedBatch {
+		uint64_t                                  tick = 0;
+		std::chrono::steady_clock::time_point     submitted_at;
+		std::vector<uint64_t>                     shader_hashes;
+	};
+
 	void BeginNext();
+	void PollSubmittedBatches(bool refresh);
+	void QuarantineDeviceLostBatches();
+	void WaitForGpu(uint64_t tick);
 	void PriorityOperationsThread(std::stop_token stop);
 	void QueueOperation(Common::UniqueFunction<void>&& operation, bool priority);
 	void RunOperation(Common::UniqueFunction<void>&& operation);
@@ -93,6 +107,10 @@ private:
 	DynamicState                 m_dynamic_state;
 	std::queue<PendingOperation> m_pending_operations;
 	std::queue<PendingOperation> m_priority_operations;
+	std::mutex                   m_batch_mutex;
+	std::deque<SubmittedBatch>   m_submitted_batches;
+	std::vector<uint64_t>        m_batch_shader_hashes;
+	uint32_t                     m_batch_command_count = 0;
 	std::mutex                   m_operation_mutex;
 	std::condition_variable      m_operation_available;
 	std::jthread                 m_priority_thread;
