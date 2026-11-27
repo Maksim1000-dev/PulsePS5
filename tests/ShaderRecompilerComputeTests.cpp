@@ -17267,6 +17267,51 @@ public:
       }
 
       {
+        // PPSA04677's first compute dispatch binds an unused V# that decodes as base
+        // 0x400000002 with 0xa10e82e0 records: guest-valid but never mapped. Binding it
+        // must drop the descriptor instead of aborting the emulator.
+        const auto program = make_buffer_program(ShaderType::Compute, {.read = true});
+        ShaderRecompiler::IR::ResourceSnapshot snapshot;
+        auto &value = snapshot.buffers.emplace_back();
+        value.dword_count = 4;
+        value.dwords = {0x40000002u, 0x00000004u, 0xa10e82e0u, 0u};
+        ShaderStageRuntime runtime{&program, &snapshot};
+        PreparedBindings bindings;
+        executor.PrepareBindings(runtime, bindings);
+        std::array<PreparedBindings *, 1> stages{&bindings};
+        executor.FindBuffers(stages);
+        executor.RebindBuffers(bindings);
+        Require(name, "unmapped oversized descriptor",
+                bindings.buffer_sources[0].address == 0 &&
+                    bindings.buffer_sources[0].size == 0 &&
+                    bindings.buffers[0].buffer == nullptr,
+                "an unmapped oversized descriptor reached the host buffer cache");
+      }
+
+      {
+        // Finite descriptors below the oversized threshold bypass the clamp, so their
+        // unmapped base must be rejected before the cache creates a host buffer.
+        const auto program = make_buffer_program(ShaderType::Compute, {.read = true});
+        constexpr uint64_t unmapped_address = base + allocation_size + 0x20000;
+        ShaderRecompiler::IR::ResourceSnapshot snapshot;
+        auto &value = snapshot.buffers.emplace_back();
+        value.dword_count = 4;
+        value.dwords = {static_cast<u32>(unmapped_address),
+                        static_cast<u32>(unmapped_address >> 32u), 0x100u, 0u};
+        ShaderStageRuntime runtime{&program, &snapshot};
+        PreparedBindings bindings;
+        executor.PrepareBindings(runtime, bindings);
+        std::array<PreparedBindings *, 1> stages{&bindings};
+        executor.FindBuffers(stages);
+        executor.RebindBuffers(bindings);
+        Require(name, "unmapped finite descriptor",
+                bindings.buffer_sources[0].address == 0 &&
+                    bindings.buffer_sources[0].size == 0 &&
+                    bindings.buffers[0].buffer == nullptr,
+                "an unmapped finite descriptor reached the host buffer cache");
+      }
+
+      {
         const auto buffer_program = make_buffer_program(ShaderType::Compute, {.read = true, .written = true});
         constexpr uint64_t buffer_address = base + 0xe0002;
         ShaderBufferResource descriptor{};

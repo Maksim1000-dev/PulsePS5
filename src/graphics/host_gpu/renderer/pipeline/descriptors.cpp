@@ -163,6 +163,36 @@ NativeStorageBuffer(RenderContext& context, const PreparedBindings::BufferSource
 	return result;
 }
 
+static const char* BufferStageName(ShaderType stage) {
+	switch (stage) {
+		case ShaderType::Vertex: return "vertex";
+		case ShaderType::Pixel: return "pixel";
+		case ShaderType::Compute: return "compute";
+		case ShaderType::Mesh: return "mesh";
+		case ShaderType::Local: return "local";
+		case ShaderType::TessellationControl: return "tessellation control";
+		case ShaderType::TessellationEvaluation: return "tessellation evaluation";
+		default: return "unknown";
+	}
+}
+
+// A descriptor the shader may never dereference can hold anything on real hardware. Report the
+// stage and shader hash once per bounded number of descriptors so the culprit stays identifiable.
+static void WarnInvalidBufferDescriptor(const ShaderRecompiler::IR::CompiledShaderInfo& program,
+                                        uint32_t                                     resource,
+                                        const ShaderRecompiler::IR::DescriptorValue& value,
+                                        uint64_t address, uint64_t size, const char* reason) {
+	static std::atomic<uint32_t> warning_count {0};
+	if (warning_count.fetch_add(1, std::memory_order_relaxed) >= 16) {
+		return;
+	}
+	LOGF("Warning: ignoring %s storage buffer descriptor: stage=%s shader=0x%016" PRIx64
+	     " resource=%" PRIu32 " address=0x%016" PRIx64 " size=0x%016" PRIx64
+	     " dwords=%08" PRIx32 ",%08" PRIx32 ",%08" PRIx32 ",%08" PRIx32 "\n",
+	     reason, BufferStageName(program.stage), program.shader_hash, resource, address, size,
+	     value.dwords[0], value.dwords[1], value.dwords[2], value.dwords[3]);
+}
+
 // Reserved and unsupported T# fields must be zero; perf_mod only scales sampler state and the
 // mip-stats counter only counts sampling.
 static bool IsCanonicalTextureEncoding(const ShaderTextureResource& descriptor, bool r128) {
@@ -820,6 +850,12 @@ void RenderExecutor::FindBuffers(std::span<PreparedBindings* const> stages) {
 				source = {};
 				continue;
 			}
+			if (!m_context.IsMapped(address, 1)) {
+				WarnInvalidBufferDescriptor(program, resource, snapshot.buffers[resource], address, size,
+				                            "unmapped");
+				source = {};
+				continue;
+			}
 			if (descriptor.NumRecords() == UINT32_MAX) {
 				if (program.info.buffers[resource].written) {
 					// Sentinel write ranges end before tables captured by any bound stage.
@@ -839,13 +875,26 @@ void RenderExecutor::FindBuffers(std::span<PreparedBindings* const> stages) {
 				const auto  limit =
 				    uint64_t {graphics.GetPhysicalDeviceProperties().limits.maxStorageBufferRange} -
 				    (graphics.StorageMinAlignment() - 1);
-				size = Libs::LibKernel::Memory::ClampRangeSize(
+				size = Libs::LibKernel::Memory::TryClampRangeSize(
 				    address, std::min({size, uint64_t {256} * 1024 * 1024, limit}));
+				if (size == 0) {
+					WarnInvalidBufferDescriptor(program, resource, snapshot.buffers[resource], address,
+					                            descriptor.GetSize(), "unclampable");
+					source = {};
+					continue;
+				}
 			} else if (size >= (uint64_t {1} << 30u)) {
 				//  PPSA18026
 				// Finite descriptors can span sparse PRT holes; oversized pool windows are mapped
 				// in pieces, so they end at their last committed range.
-				size = Libs::LibKernel::Memory::ClampRangeSize(address, size, true);
+				const auto requested = size;
+				size = Libs::LibKernel::Memory::TryClampRangeSize(address, size, true);
+				if (size == 0) {
+					WarnInvalidBufferDescriptor(program, resource, snapshot.buffers[resource], address,
+					                            requested, "unclampable");
+					source = {};
+					continue;
+				}
 			}
 			source = {address, size, cache.FindBuffer(address, size)};
 		}

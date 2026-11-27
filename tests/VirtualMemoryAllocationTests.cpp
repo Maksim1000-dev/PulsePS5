@@ -855,6 +855,20 @@ void TestClampRangeSkipsStateLock() {
 	std::printf("[host]    %-48s ok\n", test);
 }
 
+void TestTryClampRangeSizeReportsUnmappedRange() {
+	using namespace Libs::LibKernel::Memory;
+	const char* test    = "TryClampRangeSizeReportsUnmappedRange";
+	void*       reserve = nullptr;
+	CheckOk(test,
+	        KernelReserveVirtualRange(&reserve, 2 * SceKernelPageSize, 0, SceKernelPageSize),
+	        "KernelReserveVirtualRange");
+	const auto base = reinterpret_cast<uint64_t>(reserve);
+	Check(test, TryClampRangeSize(base, SceKernelPageSize) == 0,
+	      "an uncommitted range was clamped to a nonzero size");
+	CheckOk(test, KernelMunmap(base, 2 * SceKernelPageSize), "KernelMunmap");
+	std::printf("[host]    %-48s ok\n", test);
+}
+
 void TestTrackerProtectSharesBackingReads() {
 	using namespace Libs::LibKernel::Memory;
 	const char* test = "TrackerProtectSharesBackingReads";
@@ -6235,6 +6249,7 @@ int main(int argc, char** argv) {
 		RunTest(TestQueriesWaitForStateChanges);
 		RunTest(TestTrackerProtectSharesBackingReads);
 		RunTest(TestClampRangeSkipsStateLock);
+		RunTest(TestTryClampRangeSizeReportsUnmappedRange);
 		RunTest(TestSparseBackingReadPreservesResidency);
 		RunTest(TestCopySparseMemoryMappings);
 		RunTest(TestSparseReadDuringDirectCommit);
@@ -6301,6 +6316,7 @@ int main(int argc, char** argv) {
 	RunTest(TestQueriesWaitForStateChanges);
 	RunTest(TestTrackerProtectSharesBackingReads);
 	RunTest(TestClampRangeSkipsStateLock);
+	RunTest(TestTryClampRangeSizeReportsUnmappedRange);
 	RunTest(TestGuestAddressSpaceHasNoFixedFallback);
 	RunTest(TestGuestFreeRangeSearchDoesNotUnderflow);
 	RunTest(TestFragmentedGuestFreeRangeHints);

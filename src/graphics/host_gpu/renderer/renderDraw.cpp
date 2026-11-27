@@ -686,7 +686,8 @@ static void AcquireVertexBuffers(CommandBuffer& buffer, const ShaderVertexInputI
 		if (size == 0) {
 			continue;
 		}
-		if (!GuestRange {vertex.addr, size}.Valid()) {
+		if (!GuestRange {vertex.addr, size}.Valid() ||
+		    !buffer.GetContext().IsMapped(vertex.addr, 1)) {
 			WarnInvalidDrawBufferRange("vertex", vertex.addr, size);
 			sizes[i] = 0;
 			continue;
@@ -715,8 +716,13 @@ static void AcquireVertexBuffers(CommandBuffer& buffer, const ShaderVertexInputI
 	auto& cache = buffer.GetContext().GetBufferCache();
 	for (auto& range: merged_ranges) {
 		// PPSA20298
-		const auto size =
-		    Libs::LibKernel::Memory::ClampRangeSize(range.base_address, range.RequestedSize());
+		const auto size = Libs::LibKernel::Memory::TryClampRangeSize(range.base_address,
+		                                                            range.RequestedSize());
+		if (size == 0) {
+			WarnInvalidDrawBufferRange("vertex", range.base_address, range.RequestedSize());
+			range.acquired_end = range.base_address;
+			continue;
+		}
 		range.acquired_end = range.base_address + size;
 		std::tie(range.buffer, range.offset) = cache.ObtainBuffer(range.base_address, size, false);
 	}
@@ -741,8 +747,15 @@ static void AcquireVertexBuffers(CommandBuffer& buffer, const ShaderVertexInputI
 			return vertex.addr >= value.base_address && vertex.addr < value.acquired_end;
 		});
 		if (range == merged_ranges.end()) {
-			EXIT("vertex buffer address is outside the acquired range: addr=0x%016" PRIx64 "\n",
-			     vertex.addr);
+			// The merged range may end at a sparse hole before this slot's address.
+			WarnInvalidDrawBufferRange("vertex", vertex.addr, size);
+			if (null_buffer == nullptr) {
+				null_buffer = cache.GetBuffer(NULL_BUFFER_ID).Handle();
+			}
+			prepared.buffers[i] = null_buffer;
+			prepared.offsets[i] = 0;
+			prepared.sizes[i]   = 0;
+			continue;
 		}
 
 		prepared.buffers[i] = range->buffer->Handle();
